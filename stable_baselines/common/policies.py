@@ -29,6 +29,37 @@ def nature_cnn(scaled_images, **kwargs):
     return activ(linear(layer_3, 'fc1', n_hidden=512, init_scale=np.sqrt(2)))
 
 
+def attention_mask(feature_map, hard_mask=False):
+    attention_feature_map = tf.reduce_mean(feature_map, axis=-1, keepdims=True)
+    attention = tf.nn.sigmoid(
+        conv(attention_feature_map, 'atten', n_filters=1, filter_size=1, stride=1, init_scale=np.sqrt(2)))
+    if hard_mask:
+        attention_max = tf.reduce_max(tf.reduce_max(attention, axis=1, keep_dims=True), axis=2, keep_dims=True)
+        attention_min = tf.reduce_min(tf.reduce_min(attention, axis=1, keep_dims=True), axis=1, keep_dims=True)
+        attention_normalized = (attention - attention_min) / (attention_max - attention_min + 1e-9)
+        feature_map_out = tf.multiply(attention_normalized, feature_map)
+    else:
+        feature_map_out = tf.multiply(attention, feature_map)
+
+    return conv_to_fc(attention), conv_to_fc(feature_map_out)
+
+
+def nature_cnn_exposed(scaled_images, **kwargs):
+    """
+    CNN from Nature paper without last fully connected layer
+
+    :param scaled_images: (TensorFlow Tensor) Image input placeholder
+    :param kwargs: (dict) Extra keywords parameters for the convolutional layers of the CNN
+    :return: (TensorFlow Tensor) The CNN output layer
+    """
+    activ = tf.nn.relu
+    layer_1 = activ(conv(scaled_images, 'c1', n_filters=32, filter_size=8, stride=4, init_scale=np.sqrt(2), **kwargs))
+    layer_2 = activ(conv(layer_1, 'c2', n_filters=64, filter_size=4, stride=2, init_scale=np.sqrt(2), **kwargs))
+    layer_3 = activ(conv(layer_2, 'c3', n_filters=64, filter_size=3, stride=1, init_scale=np.sqrt(2), **kwargs))
+    # layer_3 = conv_to_fc(layer_3)
+    return layer_3
+
+
 def mlp_extractor(flat_observations, net_arch, act_fun):
     """
     Constructs an MLP that receives observations as an input and outputs a latent representation for the policy and
@@ -227,6 +258,11 @@ class ActorCriticPolicy(BasePolicy):
         self._action = None
         self._deterministic_action = None
 
+        self.pi_latent = None
+        self.vf_latent = None
+        self.attention = None
+        self._stop_gd_proba_distribution, self._stop_gd_policy, self.stop_gd_q_value, self._stop_gd_value_fn = None, None, None, None
+
     def _setup_init(self):
         """Sets up the distributions, actions, and value."""
         with tf.variable_scope("output", reuse=True):
@@ -242,10 +278,11 @@ class ActorCriticPolicy(BasePolicy):
                 self._policy_proba = tf.nn.sigmoid(self.policy)
             elif isinstance(self.proba_distribution, MultiCategoricalProbabilityDistribution):
                 self._policy_proba = [tf.nn.softmax(categorical.flatparam())
-                                     for categorical in self.proba_distribution.categoricals]
+                                      for categorical in self.proba_distribution.categoricals]
             else:
                 self._policy_proba = []  # it will return nothing, as it is not implemented
             self._value_flat = self.value_fn[:, 0]
+            self._stop_gd_value_flat = self._stop_gd_value_fn[:, 0]
 
     @property
     def pdtype(self):
@@ -258,9 +295,19 @@ class ActorCriticPolicy(BasePolicy):
         return self._policy
 
     @property
+    def stop_gd_policy(self):
+        """tf.Tensor: policy output, e.g. logits."""
+        return self._stop_gd_policy
+
+    @property
     def proba_distribution(self):
         """ProbabilityDistribution: distribution of stochastic actions."""
         return self._proba_distribution
+
+    @property
+    def stop_gd_proba_distribution(self):
+        """ProbabilityDistribution: distribution of stochastic actions."""
+        return self._stop_gd_proba_distribution
 
     @property
     def value_fn(self):
@@ -343,11 +390,11 @@ class RecurrentActorCriticPolicy(ActorCriticPolicy):
                                                          n_batch, reuse=reuse, scale=scale)
 
         with tf.variable_scope("input", reuse=False):
-            self._dones_ph = tf.placeholder(tf.float32, (n_batch, ), name="dones_ph")  # (done t-1)
-            state_ph_shape = (self.n_env, ) + tuple(state_shape)
+            self._dones_ph = tf.placeholder(tf.float32, (n_batch,), name="dones_ph")  # (done t-1)
+            state_ph_shape = (self.n_env,) + tuple(state_shape)
             self._states_ph = tf.placeholder(tf.float32, state_ph_shape, name="states_ph")
 
-        initial_state_shape = (self.n_env, ) + tuple(state_shape)
+        initial_state_shape = (self.n_env,) + tuple(state_shape)
         self._initial_state = np.zeros(initial_state_shape, dtype=np.float32)
 
     @property
@@ -402,7 +449,7 @@ class LstmPolicy(RecurrentActorCriticPolicy):
                  **kwargs):
         # state_shape = [n_lstm * 2] dim because of the cell and hidden states of the LSTM
         super(LstmPolicy, self).__init__(sess, ob_space, ac_space, n_env, n_steps, n_batch,
-                                         state_shape=(2 * n_lstm, ), reuse=reuse,
+                                         state_shape=(2 * n_lstm,), reuse=reuse,
                                          scale=(feature_extraction == "cnn"))
 
         self._kwargs_check(feature_extraction, kwargs)
@@ -557,13 +604,20 @@ class FeedForwardPolicy(ActorCriticPolicy):
         with tf.variable_scope("model", reuse=reuse):
             if feature_extraction == "cnn":
                 pi_latent = vf_latent = cnn_extractor(self.processed_obs, **kwargs)
+
             else:
                 pi_latent, vf_latent = mlp_extractor(tf.layers.flatten(self.processed_obs), net_arch, act_fun)
-
+            self.pi_latent = pi_latent
+            self.vf_latent = vf_latent
             self._value_fn = linear(vf_latent, 'vf', 1)
+            self._stop_gd_value_fn = linear(tf.stop_gradient(vf_latent), 'vf', 1, reuse=True)
 
             self._proba_distribution, self._policy, self.q_value = \
                 self.pdtype.proba_distribution_from_latent(pi_latent, vf_latent, init_scale=0.01)
+
+            self._stop_gd_proba_distribution, self._stop_gd_policy, self.stop_gd_q_value = \
+                self.pdtype.proba_distribution_from_latent(tf.stop_gradient(pi_latent), tf.stop_gradient(vf_latent),
+                                                           init_scale=0.01, reuse=True)
 
         self._setup_init()
 

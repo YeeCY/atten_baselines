@@ -35,6 +35,8 @@ class Fourrooms(object):
         self.occupancy = np.array(
             [list(map(lambda c: 1 if c == '1' else 0, line)) for line in self.layout.splitlines()])
         self.num_pos = int(np.sum(self.occupancy == 0))
+        self.obs_height = self.block_size * len(self.occupancy)
+        self.obs_width = self.block_size * len(self.occupancy[0])
         # From any state the agent can perform one of four actions, up, down, left or right
         self.action_space = spaces.Discrete(4)
         # self.observation_space = spaces.Discrete(np.sum(self.occupancy == 0))
@@ -75,6 +77,7 @@ class Fourrooms(object):
         self.done = False
         self.allow_early_resets = True
         self.unwrapped = self
+        self.state = -1
 
     def make_blocks(self):
         blocks = []
@@ -110,6 +113,7 @@ class Fourrooms(object):
         self.currentcell = self.tocell[state]
         self.done = False
         self.current_steps = 0
+        self.state = state
         return np.array(self.mapping[state])
 
     def step(self, action):
@@ -139,16 +143,25 @@ class Fourrooms(object):
                 self.currentcell = empty_cells[np.random.randint(len(empty_cells))]
 
         state = self.tostate[self.currentcell]
-        self.done = done = state == self.goal
+
         self.current_steps += 1
+        self.done = state == self.goal or self.current_steps >= self.max_epilen
         # if self.current_steps >= self.max_epilen:
         #     self.done = True
         info = {}
         if self.done:
             # print(self.current_step, state == self.goal, self.max_epilen)
-            info = [{'episode': {'r': state == self.goal, 'l': self.current_steps}}]
+            info = {'episode': {'r': 100 - self.current_steps if state == self.goal else -self.current_steps,
+                                'l': self.current_steps}}
         # print(self.currentcell)
-        return np.array(self.mapping[state]), float(done), self.done, info
+        self.state = state
+        reward = state == self.goal
+        if reward == 0:
+            reward = -1
+        else:
+            reward = 100
+
+        return np.array(self.mapping[state]), reward, self.done, info
 
     def get_dict(self):
         count = 0
@@ -213,8 +226,8 @@ class ImageInputWarpper(gym.Wrapper):
 
     def __init__(self, env, max_steps=100):
         gym.Wrapper.__init__(self, env)
-        screen_height = self.env.block_size * len(self.env.occupancy)
-        screen_width = self.env.block_size * len(self.env.occupancy[0])
+        screen_height = self.env.obs_height
+        screen_width = self.env.obs_width
         self.observation_space = spaces.Box(low=0, high=255, shape=(screen_height, screen_width, 3))
         self.num_steps = 0
         self.max_steps = max_steps
@@ -224,24 +237,27 @@ class ImageInputWarpper(gym.Wrapper):
         self.num_steps += 1
         if self.num_steps >= self.max_steps:
             done = True
-        obs = self.env.render()
+        obs = self.env.render(self.env.state)
         return obs, reward, done, info
 
     def reset(self):
         self.num_steps = 0
         self.env.reset()
-        obs = self.env.render()
+        obs = self.env.render(self.env.state)
         return obs
 
 
 class FourroomsDynamicNoise(Fourrooms):  # noise type = dynamic relevant
-    def __init__(self, max_epilen=100, obs_size=128):
+    def __init__(self, max_epilen=100, obs_size=128, seed=0):
         super(FourroomsDynamicNoise, self).__init__(max_epilen)
         self.obs_size = obs_size
+        self.obs_height = obs_size
+        self.obs_width = obs_size
         self.background = np.random.randint(0, 255, (10, 1, 1, 3))
         self.background[:, :, :, 2] = 0
         self.background = np.tile(self.background, (1, obs_size, obs_size, 1))
-
+        np.random.seed(seed)
+        self.seed = seed
         self.color = np.random.randint(0, 255, (200, 3))
         self.color[:, 2] = 100
         self.num_steps = 0
@@ -275,19 +291,23 @@ class FourroomsDynamicNoise(Fourrooms):  # noise type = dynamic relevant
 
 
 class FourroomsDynamicNoise2(Fourrooms):  # noise type = state relevant
-    def __init__(self, max_epilen=100, obs_size=128):
+    def __init__(self, max_epilen=100, obs_size=128, seed=0):
         super(FourroomsDynamicNoise2, self).__init__(max_epilen)
         self.obs_size = obs_size
+        self.obs_height = obs_size
+        self.obs_width = obs_size
         self.background = np.random.randint(0, 255, (10, 1, 1, 3))
         self.background[:, :, :, 2] = 0
         self.background = np.tile(self.background, (1, obs_size, obs_size, 1))
-
+        np.random.seed(seed)
+        self.seed = seed
         self.color = np.random.randint(0, 255, (200, 3))
         self.color[:, 2] = 100
         self.num_steps = 0
         self.observation_space = spaces.Discrete(self.num_pos)
 
         self.last_action = -1
+
     def step(self, action):
         state, reward, done, info = super(FourroomsDynamicNoise2, self).step(action)
         self.num_steps += 1
@@ -296,9 +316,9 @@ class FourroomsDynamicNoise2(Fourrooms):  # noise type = state relevant
 
     def render(self, state=-1):
         # which_background = self.num_steps % 3
-        obs = np.zeros((self.obs_size, self.obs_size, 3))
-        obs[:12, :12, :] = self.color[state + 1]
-
+        # obs = np.zeros((self.obs_size, self.obs_size, 3))
+        # obs[:12, :12, :] = self.color[state + 1]
+        obs = np.tile(self.color[state+1][np.newaxis, np.newaxis, :], (self.obs_size, self.obs_size, 1))
         # obs = np.random.randint(0, 255, (self.obs_size, self.obs_size, 3))
         # obs = np.tile(self.color[which_background][np.newaxis, np.newaxis, :], (self.obs_size, self.obs_size, 1))
         # obs = (state+100) * np.ones((self.obs_size,self.obs_size))
@@ -310,13 +330,16 @@ class FourroomsDynamicNoise2(Fourrooms):  # noise type = state relevant
 
 
 class FourroomsDynamicNoise3(Fourrooms):  # noise type = action relevant
-    def __init__(self, max_epilen=100, obs_size=128):
+    def __init__(self, max_epilen=100, obs_size=128, seed=0):
         super(FourroomsDynamicNoise3, self).__init__(max_epilen)
         self.obs_size = obs_size
+        self.obs_height = obs_size
+        self.obs_width = obs_size
         self.background = np.random.randint(0, 255, (10, 1, 1, 3))
         self.background[:, :, :, 2] = 0
         self.background = np.tile(self.background, (1, obs_size, obs_size, 1))
-
+        np.random.seed(seed)
+        self.seed = seed
         self.color = np.random.randint(0, 255, (200, 3))
         self.color[:, 2] = 100
         self.num_steps = 0
@@ -345,5 +368,48 @@ class FourroomsDynamicNoise3(Fourrooms):  # noise type = action relevant
     def reset(self, state=-1):
         self.num_steps = state % 3
         obs = super(FourroomsDynamicNoise3, self).reset(state % self.num_pos)
+
+        return obs
+
+
+class FourroomsRandomNoise(Fourrooms):  # noise type = action relevant
+    def __init__(self, max_epilen=100, obs_size=128, seed=0):
+        super(FourroomsRandomNoise, self).__init__(max_epilen)
+        self.obs_size = obs_size
+        self.obs_height = obs_size
+        self.obs_width = obs_size
+        self.background = np.random.randint(0, 255, (10, 1, 1, 3))
+        self.background[:, :, :, 2] = 0
+        self.background = np.tile(self.background, (1, obs_size, obs_size, 1))
+        np.random.seed(seed)
+        self.seed = seed
+        self.color = np.random.randint(0, 255, (200, 3))
+        self.color[:, 2] = 100
+        self.num_steps = 0
+        self.observation_space = spaces.Discrete(self.num_pos * self.action_space.n)
+
+    def render(self, state=-1):
+        which_background = np.random.randint(0,4)
+        # obs = np.zeros((self.obs_size, self.obs_size, 3))
+        # obs[:12, :12, :] = self.color[state + 1]
+
+        # obs = np.random.randint(0, 255, (self.obs_size, self.obs_size, 3))
+        obs = np.tile(self.color[which_background][np.newaxis, np.newaxis, :], (self.obs_size, self.obs_size, 1))
+        # obs = (state+100) * np.ones((self.obs_size,self.obs_size))
+
+        arr = super(FourroomsRandomNoise, self).render(state)
+        padding_height, padding_width = (obs.shape[0] - arr.shape[0]) // 2, (obs.shape[1] - arr.shape[1]) // 2
+        obs[padding_height:padding_height + arr.shape[0], padding_width:padding_width + arr.shape[1], :] = arr
+        return obs
+
+    def step(self, action):
+        state, reward, done, info = super(FourroomsRandomNoise, self).step(action)
+        self.num_steps += 1
+        state += self.num_pos * action
+        return state, reward, done, info
+
+    def reset(self, state=-1):
+        self.num_steps = state % 3
+        obs = super(FourroomsRandomNoise, self).reset(state % self.num_pos)
 
         return obs

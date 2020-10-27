@@ -47,6 +47,7 @@ class BaseRLModel(ABC):
         else:
             self.policy = policy
         self.env = env
+        self.test_env = None
         self.verbose = verbose
         self._requires_vec_env = requires_vec_env
         self.policy_kwargs = {} if policy_kwargs is None else policy_kwargs
@@ -62,7 +63,9 @@ class BaseRLModel(ABC):
         self._param_load_ops = None
         self.n_cpu_tf_sess = n_cpu_tf_sess
         self.episode_reward = None
+        self.episode_reward_test = None
         self.ep_info_buf = None
+        self.ep_info_buf_test = None
 
         if env is not None:
             if isinstance(env, str):
@@ -184,8 +187,8 @@ class BaseRLModel(ABC):
         pass
 
     def _init_callback(self,
-                      callback: Union[None, Callable, List[BaseCallback], BaseCallback]
-                      ) -> BaseCallback:
+                       callback: Union[None, Callable, List[BaseCallback], BaseCallback]
+                       ) -> BaseCallback:
         """
         :param callback: (Union[None, Callable, List[BaseCallback], BaseCallback])
         :return: (BaseCallback)
@@ -228,6 +231,17 @@ class BaseRLModel(ABC):
             self.episode_reward = np.zeros((self.n_envs,))
         if self.ep_info_buf is None:
             self.ep_info_buf = deque(maxlen=100)
+
+    def _setup_test(self):
+        """
+        Check the environment.
+        """
+        if self.test_env is None:
+            raise ValueError("Error: cannot test the model without a test environment, please set an environment")
+        if self.episode_reward_test is None:
+            self.episode_reward_test = np.zeros((1,))
+        if self.ep_info_buf_test is None:
+            self.ep_info_buf_test = deque(maxlen=100)
 
     @abstractmethod
     def get_parameter_list(self):
@@ -863,7 +877,7 @@ class ActorCriticRLModel(BaseRLModel):
                 # Discrete action probability, over multiple categories
                 actions = np.swapaxes(actions, 0, 1)  # swap axis for easier categorical split
                 prob = np.prod([proba[np.arange(act.shape[0]), act]
-                                         for proba, act in zip(actions_proba, actions)], axis=0)
+                                for proba, act in zip(actions_proba, actions)], axis=0)
 
             elif isinstance(self.action_space, gym.spaces.MultiBinary):
                 actions = actions.reshape((-1, self.action_space.n))
@@ -873,7 +887,7 @@ class ActorCriticRLModel(BaseRLModel):
                 prob = np.prod(actions_proba * actions + (1 - actions_proba) * (1 - actions), axis=1)
 
             elif isinstance(self.action_space, gym.spaces.Box):
-                actions = actions.reshape((-1, ) + self.action_space.shape)
+                actions = actions.reshape((-1,) + self.action_space.shape)
                 mean, logstd = actions_proba
                 std = np.exp(logstd)
 

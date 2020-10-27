@@ -107,7 +107,7 @@ def conv(input_tensor, scope, *, n_filters, filter_size, stride,
         return bias + tf.nn.conv2d(input_tensor, weight, strides=strides, padding=pad, data_format=data_format)
 
 
-def linear(input_tensor, scope, n_hidden, *, init_scale=1.0, init_bias=0.0):
+def linear(input_tensor, scope, n_hidden, *, init_scale=1.0, init_bias=0.0, reuse=None):
     """
     Creates a fully connected layer for TensorFlow
 
@@ -118,7 +118,7 @@ def linear(input_tensor, scope, n_hidden, *, init_scale=1.0, init_bias=0.0):
     :param init_bias: (int) The initialization offset bias
     :return: (TensorFlow Tensor) fully connected layer
     """
-    with tf.variable_scope(scope):
+    with tf.variable_scope(scope, reuse=reuse):
         n_input = input_tensor.get_shape()[1].value
         weight = tf.get_variable("w", [n_input, n_hidden], initializer=ortho_init(init_scale))
         bias = tf.get_variable("b", [n_hidden], initializer=tf.constant_initializer(init_bias))

@@ -350,13 +350,14 @@ class PPO2(ActorCriticRLModel):
                     inds = np.arange(self.n_batch)
                     for epoch_num in range(self.noptepochs):
                         np.random.shuffle(inds)
+
                         for start in range(0, self.n_batch, batch_size):
                             timestep = self.num_timesteps // update_fac + ((epoch_num *
                                                                             self.n_batch + start) // batch_size)
                             end = start + batch_size
                             mbinds = inds[start:end]
                             slices = (arr[mbinds] for arr in (obs, returns, masks, actions, values, neglogpacs))
-                            mb_loss_vals.append(self._train_step(lr_now, cliprange_now, *slices, writer=writer,
+                            mb_loss_vals.append(self._train_step(lr_now, cliprange_now,*slices, writer=writer,
                                                                  update=timestep, cliprange_vf=cliprange_vf_now))
                 else:  # recurrent version
                     update_fac = max(self.n_batch // self.nminibatches // self.noptepochs // self.n_steps, 1)

@@ -479,7 +479,7 @@ def outer_scope_getter(scope, new_scope=""):
 # ================================================================
 
 
-def total_episode_reward_logger(rew_acc, rewards, masks, writer, steps):
+def total_episode_reward_logger(rew_acc, rewards, masks, writer, steps, suffix=""):
     """
     calculates the cumulated episode reward, and prints to tensorflow log the output
 
@@ -499,11 +499,11 @@ def total_episode_reward_logger(rew_acc, rewards, masks, writer, steps):
                 rew_acc[env_idx] += sum(rewards[env_idx])
             else:
                 rew_acc[env_idx] += sum(rewards[env_idx, :dones_idx[0, 0]])
-                summary = tf.Summary(value=[tf.Summary.Value(tag="episode_reward", simple_value=rew_acc[env_idx])])
+                summary = tf.Summary(value=[tf.Summary.Value(tag="episode_reward"+suffix, simple_value=rew_acc[env_idx])])
                 writer.add_summary(summary, steps + dones_idx[0, 0])
                 for k in range(1, len(dones_idx[:, 0])):
                     rew_acc[env_idx] = sum(rewards[env_idx, dones_idx[k - 1, 0]:dones_idx[k, 0]])
-                    summary = tf.Summary(value=[tf.Summary.Value(tag="episode_reward", simple_value=rew_acc[env_idx])])
+                    summary = tf.Summary(value=[tf.Summary.Value(tag="episode_reward"+suffix, simple_value=rew_acc[env_idx])])
                     writer.add_summary(summary, steps + dones_idx[k, 0])
                 rew_acc[env_idx] = sum(rewards[env_idx, dones_idx[-1, 0]:])
 

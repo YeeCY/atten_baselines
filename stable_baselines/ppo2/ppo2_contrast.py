@@ -1,9 +1,8 @@
 import time
-import os
+
 import gym
 import numpy as np
 import tensorflow as tf
-import cv2
 
 from stable_baselines import logger
 from stable_baselines.common import explained_variance, ActorCriticRLModel, tf_util, SetVerbosity, TensorboardWriter
@@ -12,10 +11,10 @@ from stable_baselines.common.policies import ActorCriticPolicy, RecurrentActorCr
 from stable_baselines.common.schedules import get_schedule_fn
 from stable_baselines.common.tf_util import total_episode_reward_logger
 from stable_baselines.common.math_util import safe_mean, safe_sum
-from stable_baselines.ppo2.dqn_utils import ReplayBuffer, get_true_return
+from stable_baselines.ppo2.dqn_utils import ReplayBuffer
 
 
-class PPO2Repr(ActorCriticRLModel):
+class PPO2Contrast(ActorCriticRLModel):
     """
     Proximal Policy Optimization algorithm (GPU version).
     Paper: https://arxiv.org/abs/1707.06347
@@ -54,7 +53,7 @@ class PPO2Repr(ActorCriticRLModel):
     """
 
     def __init__(self, policy, env, test_env, gamma=0.99, n_steps=128, ent_coef=0.01, learning_rate=2.5e-4, vf_coef=0.5,
-                 repr_coef=0., contra_coef=1., atten_encoder_coef=0., atten_decoder_coef=0.,
+                 repr_coef=0., contra_coef=0.,
                  max_grad_norm=0.5, lam=0.95, nminibatches=4, noptepochs=4, cliprange=0.2, cliprange_vf=None,
                  verbose=0, tensorboard_log=None, _init_setup_model=True, policy_kwargs=None,
                  full_tensorboard_log=False, seed=None, n_cpu_tf_sess=None, c_loss_type="sqmargin"):
@@ -67,8 +66,6 @@ class PPO2Repr(ActorCriticRLModel):
         self.vf_coef = vf_coef
         self.repr_coef = repr_coef
         self.contra_coef = contra_coef
-        self.atten_encoder_coef = atten_encoder_coef
-        self.atten_decoder_coef = atten_decoder_coef
         self.max_grad_norm = max_grad_norm
         self.gamma = gamma
         self.lam = lam
@@ -86,15 +83,8 @@ class PPO2Repr(ActorCriticRLModel):
         self.entropy = None
         self.vf_loss = None
         self.pg_loss = None
-        self.pg_loss_stop_gd = None
-        self.approxkl_stop_gd = None
-        self.clipfrac_stop_gd = None
-        self.repr_loss = None
-        self.contrastive_loss = None
         self.approxkl = None
-        self.approxkl_stop_gd = None
         self.clipfrac = None
-        self.clipfrac_stop_gd = None
         self._train = None
         self._finetune = None
         self.loss_names = None
@@ -106,7 +96,7 @@ class PPO2Repr(ActorCriticRLModel):
         self.summary = None
         self._test_runner = None
         self.c_loss_type = c_loss_type
-        self.replay_buffer = ReplayBuffer(10000, 1)
+        self.replay_buffer = ReplayBuffer(250000, 1)
         super().__init__(policy=policy, env=env, verbose=verbose, requires_vec_env=True,
                          _init_setup_model=_init_setup_model, policy_kwargs=policy_kwargs,
                          seed=seed, n_cpu_tf_sess=n_cpu_tf_sess)
@@ -243,9 +233,7 @@ class PPO2Repr(ActorCriticRLModel):
 
                     self.contrastive_loss = self.contrastive_loss_fc(emb_cur, emb_next, emb_neq,
                                                                      c_type=self.c_loss_type)
-                    self.encoder_loss = self.atten_encoder_coef * tf.reduce_mean(
-                        tf.norm(train_model.attention, ord=1, axis=1))
-                    self.repr_loss = self.contrastive_loss + self.encoder_loss
+                    self.repr_loss = self.contrastive_loss
                     loss = self.pg_loss - self.entropy * self.ent_coef + self.vf_loss * self.vf_coef + self.repr_coef * self.repr_loss
                     loss_stop_gd = self.pg_loss_stop_gd - self.entropy_stop_gd * self.ent_coef + self.vf_loss_stop_gd * self.vf_coef
 
@@ -473,7 +461,7 @@ class PPO2Repr(ActorCriticRLModel):
             self._test_runner = self._make_test_runner()
         return self._test_runner
 
-    def eval(self, tb_log_name="PPO2", callback=None, print_attention_map=False, filedir=None):
+    def eval(self, tb_log_name="PPO2", callback=None):
         new_tb_log = self._init_num_timesteps(False)
         callback = self._init_callback(callback)
         runner = self.test_runner  # run on eval env
@@ -485,7 +473,7 @@ class PPO2Repr(ActorCriticRLModel):
 
             rollout = runner.run(callback)
             # Unpack
-            obs, returns, masks, actions, values, neglogpacs, states, ep_infos, true_reward, attention = rollout
+            obs, returns, masks, actions, values, neglogpacs, states, ep_infos, true_reward = rollout
             self.ep_info_buf_test.extend(ep_infos)
             t_now = time.time()
             fps = int(self.n_batch / (t_now - t_start))
@@ -504,44 +492,8 @@ class PPO2Repr(ActorCriticRLModel):
                     logger.logkv('ep_len_mean_eval', safe_mean([ep_info['l'] for ep_info in self.ep_info_buf_test]))
                 logger.logkv('time_elapsed_eval', t_now - t_start)
                 logger.dumpkvs()
-
-            # save attention image
-            if print_attention_map:
-                rnd_indices = np.random.choice(len(obs), 5)
-                for i in range(len(rnd_indices)):
-                    ind = rnd_indices[i]
-                    self.save_attention(attention[ind], obs[ind], filedir, self.num_timesteps, i)
-
         callback.on_training_end()
         return self
-
-    def save_attention(self, attention, obs, filedir, step, num):
-        subdir = os.path.join(filedir, "./attention")
-        # print(attention.squeeze())
-
-        length = int(np.sqrt(np.size(attention)))
-        attention = attention.reshape(length, length)
-        attention = (attention - np.min(attention)) / (np.max(attention) - np.min(attention))
-        attention = cv2.resize(attention, (obs.shape[0], obs.shape[1]))
-
-        attention = np.repeat(attention[..., np.newaxis], 3, axis=2)
-        image = np.array(obs)[..., :3]
-        # print(image.shape)
-        attentioned_image = image * attention
-        if not os.path.isdir(subdir):
-            os.makedirs(os.path.join(subdir, "./mask/"))
-            os.makedirs(os.path.join(subdir, "./masked_image/"))
-            os.makedirs(os.path.join(subdir, "./image/"))
-        # print(attention.shape)
-        cv2.imwrite(os.path.join(subdir, "./masked_image/", "masked_image_{}_{}.png".format(step, num)),
-                    attentioned_image.transpose((1, 0, 2)))
-        # attentioned_image)
-        cv2.imwrite(os.path.join(subdir, "./mask/", "attention_{}_{}.png".format(step, num)),
-                    # attention * 255)
-                    attention.transpose((1, 0, 2)) * 255)
-        cv2.imwrite(os.path.join(subdir, "./image/", "obs_{}_{}.png".format(step, num)),
-                    # image * 255)
-                    image.transpose((1, 0, 2)))
 
     def learn(self, total_timesteps, finetune=False, callback=None, log_interval=1, tb_log_name="PPO2",
               reset_num_timesteps=True):
@@ -582,10 +534,10 @@ class PPO2Repr(ActorCriticRLModel):
                 # true_reward is the reward without discount
                 rollout = runner.run(callback)
                 # Unpack
-                obs, returns, masks, actions, values, neglogpacs, states, ep_infos, true_reward, _ = rollout
-                true_returns = get_true_return(true_reward)
+                obs, returns, masks, actions, values, neglogpacs, states, ep_infos, true_reward = rollout
+
                 # Save
-                self.replay_buffer.add_batch(obs, actions, true_returns, masks)
+                self.replay_buffer.add_batch(obs, actions, returns, masks)
 
                 callback.on_rollout_end()
 
@@ -664,16 +616,15 @@ class PPO2Repr(ActorCriticRLModel):
 
                 if self.verbose >= 1 and (update % log_interval == 0 or update == 1):
                     explained_var = explained_variance(values, returns)
-                    logger.logkv("serial_timesteps" + suffix, update * self.n_steps)
-                    logger.logkv("n_updates" + suffix, update)
-                    logger.logkv("total_timesteps" + suffix, self.num_timesteps)
-                    logger.logkv("fps" + suffix, fps)
-                    logger.logkv("explained_variance" + suffix, float(explained_var))
+                    logger.logkv("serial_timesteps"+suffix, update * self.n_steps)
+                    logger.logkv("n_updates"+suffix, update)
+                    logger.logkv("total_timesteps"+suffix, self.num_timesteps)
+                    logger.logkv("fps"+suffix, fps)
+                    logger.logkv("explained_variance"+suffix, float(explained_var))
                     if len(self.ep_info_buf) > 0 and len(self.ep_info_buf[0]) > 0:
-                        logger.logkv('ep_reward_mean' + suffix,
-                                     safe_mean([ep_info['r'] for ep_info in self.ep_info_buf]))
-                        logger.logkv('ep_len_mean' + suffix, safe_mean([ep_info['l'] for ep_info in self.ep_info_buf]))
-                    logger.logkv('time_elapsed' + suffix, t_start - t_first_start)
+                        logger.logkv('ep_reward_mean'+suffix, safe_mean([ep_info['r'] for ep_info in self.ep_info_buf]))
+                        logger.logkv('ep_len_mean'+suffix, safe_mean([ep_info['l'] for ep_info in self.ep_info_buf]))
+                    logger.logkv('time_elapsed'+suffix, t_start - t_first_start)
                     loss_names = self.loss_names if not finetune else self.finetune_loss_names
                     for (loss_val, loss_name) in zip(loss_vals, loss_names):
                         logger.logkv(loss_name, loss_val)
@@ -741,17 +692,16 @@ class Runner(AbstractEnvRunner):
             - infos: (dict) the extra information of the model
         """
         # mb stands for minibatch
-        mb_obs, mb_rewards, mb_actions, mb_values, mb_dones, mb_neglogpacs, mb_attention = [], [], [], [], [], [], []
+        mb_obs, mb_rewards, mb_actions, mb_values, mb_dones, mb_neglogpacs = [], [], [], [], [], []
         mb_states = self.states
         ep_infos = []
         for _ in range(self.n_steps):
-            actions, values, self.states, neglogpacs,attention = self.model.step(self.obs, self.states, self.dones)
+            actions, values, self.states, neglogpacs = self.model.step(self.obs, self.states, self.dones)
             mb_obs.append(self.obs.copy())
             mb_actions.append(actions)
             mb_values.append(values)
             mb_neglogpacs.append(neglogpacs)
             mb_dones.append(self.dones)
-            mb_attention.append(attention)
             clipped_actions = actions
             # Clip the actions to avoid out of bound error
             if isinstance(self.env.action_space, gym.spaces.Box):
@@ -780,7 +730,6 @@ class Runner(AbstractEnvRunner):
         mb_values = np.asarray(mb_values, dtype=np.float32)
         mb_neglogpacs = np.asarray(mb_neglogpacs, dtype=np.float32)
         mb_dones = np.asarray(mb_dones, dtype=np.bool)
-        mb_attention = np.asarray(mb_attention, dtype=np.float32)
         last_values = self.model.value(self.obs, self.states, self.dones)
         # discount/bootstrap off value fn
         mb_advs = np.zeros_like(mb_rewards)
@@ -797,11 +746,10 @@ class Runner(AbstractEnvRunner):
             mb_advs[step] = last_gae_lam = delta + self.gamma * self.lam * nextnonterminal * last_gae_lam
         mb_returns = mb_advs + mb_values
 
-        mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, true_reward, mb_attention = \
-            map(swap_and_flatten,
-                (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, true_reward, mb_attention))
+        mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, true_reward = \
+            map(swap_and_flatten, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, true_reward))
 
-        return mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, mb_states, ep_infos, true_reward, mb_attention
+        return mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, mb_states, ep_infos, true_reward
 
 
 # obs, returns, masks, actions, values, neglogpacs, states = runner.run()
