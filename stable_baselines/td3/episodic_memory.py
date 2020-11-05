@@ -49,9 +49,10 @@ class EpisodicMemory(object):
     #     return [buffer.curr_capacity for buffer in self.ec_buffer]
 
     def add(self, obs, action, state, encoded_action, sampled_return, next_id=-1):
-        state, encoded_action = np.squeeze(state), np.squeeze(encoded_action)
-        if len(encoded_action.shape) == 0:
-            encoded_action = encoded_action[np.newaxis, ...]
+        if state is not None and encoded_action is not None:
+            state, encoded_action = np.squeeze(state), np.squeeze(encoded_action)
+            if len(encoded_action.shape) == 0:
+                encoded_action = encoded_action[np.newaxis, ...]
         if self.curr_capacity >= self.capacity:
             # find the LRU entry
             # priority = self.w_q *(self.q_values[:self.capacity]) + self.lru
@@ -71,7 +72,8 @@ class EpisodicMemory(object):
             self.curr_capacity += 1
         self.replay_buffer[index] = obs
         self.action_buffer[index] = action
-        self.latent_buffer[index] = np.concatenate([state, encoded_action])
+        if state is not None and encoded_action is not None:
+            self.latent_buffer[index] = np.concatenate([state, encoded_action])
         self.q_values[index] = sampled_return
         self.lru[index] = self.time
         new_key = tuple(np.squeeze(np.concatenate([obs, action])).astype('float32'))

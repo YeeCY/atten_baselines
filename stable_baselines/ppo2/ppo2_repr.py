@@ -13,6 +13,7 @@ from stable_baselines.common.schedules import get_schedule_fn
 from stable_baselines.common.tf_util import total_episode_reward_logger
 from stable_baselines.common.math_util import safe_mean, safe_sum
 from stable_baselines.ppo2.dqn_utils import ReplayBuffer, get_true_return
+import pyvirtualdisplay
 
 
 class PPO2Repr(ActorCriticRLModel):
@@ -53,11 +54,12 @@ class PPO2Repr(ActorCriticRLModel):
         If None, the number of cpu of the current machine will be used.
     """
 
-    def __init__(self, policy, env, test_env, gamma=0.99, n_steps=128, ent_coef=0.01, learning_rate=2.5e-4, vf_coef=0.5,
-                 repr_coef=0., contra_coef=1., atten_encoder_coef=0., atten_decoder_coef=0.,
+    def __init__(self, policy, env, test_env=None, gamma=0.99, n_steps=128, ent_coef=0.01, learning_rate=2.5e-4,
+                 vf_coef=0.5,
+                 repr_coef=1., contra_coef=0., atten_encoder_coef=1e-4, atten_decoder_coef=1e-2,
                  max_grad_norm=0.5, lam=0.95, nminibatches=4, noptepochs=4, cliprange=0.2, cliprange_vf=None,
                  verbose=0, tensorboard_log=None, _init_setup_model=True, policy_kwargs=None,
-                 full_tensorboard_log=False, seed=None, n_cpu_tf_sess=None, c_loss_type="sqmargin"):
+                 full_tensorboard_log=False, seed=None, n_cpu_tf_sess=None, c_loss_type="sqmargin", value_dict=None):
 
         self.learning_rate = learning_rate
         self.cliprange = cliprange
@@ -83,6 +85,7 @@ class PPO2Repr(ActorCriticRLModel):
         self.old_vpred_ph = None
         self.learning_rate_ph = None
         self.clip_range_ph = None
+        self.mem_return_ph = None
         self.entropy = None
         self.vf_loss = None
         self.pg_loss = None
@@ -106,7 +109,16 @@ class PPO2Repr(ActorCriticRLModel):
         self.summary = None
         self._test_runner = None
         self.c_loss_type = c_loss_type
+
+        self.target_model = None
+        self.positive_model = None
+        self.negative_model = None
+        self.attention_model = None
+
         self.replay_buffer = ReplayBuffer(10000, 1)
+
+        self.magic_num = None
+        self.value_dict = value_dict
         super().__init__(policy=policy, env=env, verbose=verbose, requires_vec_env=True,
                          _init_setup_model=_init_setup_model, policy_kwargs=policy_kwargs,
                          seed=seed, n_cpu_tf_sess=n_cpu_tf_sess)
@@ -151,6 +163,11 @@ class PPO2Repr(ActorCriticRLModel):
 
                 act_model = self.policy(self.sess, self.observation_space, self.action_space, self.n_envs, 1,
                                         n_batch_step, reuse=False, **self.policy_kwargs)
+
+                # magic_num = tf.get_variable("magic")
+                self.magic_num = tf.get_variable(name='magic', shape=[1])
+                self.sess.run(self.magic_num.assign([0]))
+
                 with tf.variable_scope("train_model", reuse=True,
                                        custom_getter=tf_util.outer_scope_getter("train_model")):
                     train_model = self.policy(self.sess, self.observation_space, self.action_space,
@@ -165,6 +182,9 @@ class PPO2Repr(ActorCriticRLModel):
                     target_model = self.policy(self.sess, self.observation_space, self.action_space,
                                                self.n_envs // self.nminibatches, self.n_steps, n_batch_train,
                                                reuse=True, **self.policy_kwargs)
+                    attention_model = self.policy(self.sess, self.observation_space, self.action_space,
+                                                  self.n_envs // self.nminibatches, self.n_steps, n_batch_train,
+                                                  reuse=True, **self.policy_kwargs)
 
                 with tf.variable_scope("loss", reuse=False):
                     self.action_ph = train_model.pdtype.sample_placeholder([None], name="action_ph")
@@ -174,6 +194,7 @@ class PPO2Repr(ActorCriticRLModel):
                     self.old_vpred_ph = tf.placeholder(tf.float32, [None], name="old_vpred_ph")
                     self.learning_rate_ph = tf.placeholder(tf.float32, [], name="learning_rate_ph")
                     self.clip_range_ph = tf.placeholder(tf.float32, [], name="clip_range_ph")
+                    self.mem_return_ph = tf.placeholder(tf.float32, [None], name="mem_return_ph")
 
                     neglogpac = train_model.proba_distribution.neglogp(self.action_ph)
                     neglogpac_stop_gd = train_model.stop_gd_proba_distribution.neglogp(self.action_ph)
@@ -243,10 +264,16 @@ class PPO2Repr(ActorCriticRLModel):
 
                     self.contrastive_loss = self.contrastive_loss_fc(emb_cur, emb_next, emb_neq,
                                                                      c_type=self.c_loss_type)
-                    self.encoder_loss = self.atten_encoder_coef * tf.reduce_mean(
+                    self.encoder_loss = self.contra_coef * self.atten_encoder_coef * tf.reduce_mean(
                         tf.norm(train_model.attention, ord=1, axis=1))
-                    self.repr_loss = self.contrastive_loss + self.encoder_loss
+                    # self.weight_loss = tf.norm(self.train_model.weighted_w,ord=1)
+                    self.decoder_loss = self.atten_decoder_coef * tf.reduce_mean(
+                        tf.square(attention_model.mem_value_fn - self.mem_return_ph))
+
+                    self.repr_loss = self.contrastive_loss + self.encoder_loss + self.decoder_loss
                     loss = self.pg_loss - self.entropy * self.ent_coef + self.vf_loss * self.vf_coef + self.repr_coef * self.repr_loss
+                    ppo_loss = self.pg_loss - self.entropy * self.ent_coef + self.vf_loss * self.vf_coef
+
                     loss_stop_gd = self.pg_loss_stop_gd - self.entropy_stop_gd * self.ent_coef + self.vf_loss_stop_gd * self.vf_coef
 
                     tf.summary.scalar('entropy_loss', self.entropy)
@@ -261,26 +288,43 @@ class PPO2Repr(ActorCriticRLModel):
                     tf.summary.scalar('clip_factor_finetune', self.clipfrac_stop_gd)
                     tf.summary.scalar('loss', loss)
                     tf.summary.scalar('loss_finetune', loss_stop_gd)
+                    tf.summary.scalar('contrastive_loss', self.contrastive_loss)
+                    tf.summary.scalar('atten_encoder_loss', self.encoder_loss)
+                    tf.summary.scalar('atten_decoder_loss', self.decoder_loss)
 
                     with tf.variable_scope('model'):
                         self.params = tf.trainable_variables()
+                        print(self.params)
+                        self.ppo_params = tf.trainable_variables(scope="model/last_layer")
+                        self.repr_params = tf.trainable_variables(scope="model/feature")
+                        print(self.ppo_params, self.repr_params)
                         if self.full_tensorboard_log:
                             for var in self.params:
                                 tf.summary.histogram(var.name, var)
-                    grads = tf.gradients(loss, self.params)
+                    grads = tf.gradients(ppo_loss, self.ppo_params)
                     if self.max_grad_norm is not None:
                         grads, _grad_norm = tf.clip_by_global_norm(grads, self.max_grad_norm)
-                    grads = list(zip(grads, self.params))
+                    grads = list(zip(grads, self.ppo_params))
+
+                    repr_grads = tf.gradients(self.repr_loss, self.repr_params)
+                    if self.max_grad_norm is not None:
+                        repr_grads, _repr_grad_norm = tf.clip_by_global_norm(repr_grads, self.max_grad_norm)
+                    repr_grads = list(zip(repr_grads, self.repr_params))
+
                     grads_stop_gd = tf.gradients(loss_stop_gd, self.params)
                     if self.max_grad_norm is not None:
                         grads_stop_gd, _grad_norm_stop_gd = tf.clip_by_global_norm(grads_stop_gd, self.max_grad_norm)
                     grads_stop_gd = list(zip(grads_stop_gd, self.params))
+
                 trainer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_ph, epsilon=1e-5)
+                repr_trainer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_ph, epsilon=1e-5)
                 finetuner = tf.train.AdamOptimizer(learning_rate=self.learning_rate_ph, epsilon=1e-5)
                 self._train = trainer.apply_gradients(grads)
+                self._repr_train = repr_trainer.apply_gradients(repr_grads)
                 self._finetune = finetuner.apply_gradients(grads_stop_gd)
 
-                self.loss_names = ['repr_loss', 'policy_loss', 'value_loss', 'policy_entropy', 'approxkl', 'clipfrac']
+                self.loss_names = ['repr_loss', 'contrastive_loss', 'atten_encoder_loss', 'atten_decoder_loss',
+                                   'policy_loss', 'value_loss', 'policy_entropy', 'approxkl', 'clipfrac']
                 self.finetune_loss_names = ['repr_loss_finetune', 'policy_loss_finetune', 'value_loss_finetune',
                                             'policy_entropy_finetune', 'approxkl_finetune', 'clipfrac_finetune']
 
@@ -311,8 +355,10 @@ class PPO2Repr(ActorCriticRLModel):
                 self.target_model = target_model
                 self.positive_model = positive_model
                 self.negative_model = negative_model
+                self.attention_model = attention_model
                 self.act_model = act_model
                 self.step = act_model.step
+                # self.act = act_model.act
                 self.proba_step = act_model.proba_step
                 self.value = act_model.value
                 self.initial_state = act_model.initial_state
@@ -320,7 +366,8 @@ class PPO2Repr(ActorCriticRLModel):
 
                 self.summary = tf.summary.merge_all()
 
-    def _train_step(self, learning_rate, cliprange, obs_target, obs_pos, obs_neg, obs, returns, masks, actions, values,
+    def _train_step(self, learning_rate, cliprange, obs_target, obs_pos, obs_neg, true_returns_target, obs, returns,
+                    masks, actions, values,
                     neglogpacs, update,
                     writer, states=None, cliprange_vf=None):
         """
@@ -348,8 +395,11 @@ class PPO2Repr(ActorCriticRLModel):
                   self.learning_rate_ph: learning_rate, self.clip_range_ph: cliprange,
                   self.old_neglog_pac_ph: neglogpacs, self.old_vpred_ph: values,
                   self.target_model.obs_ph: obs_target,
+                  self.attention_model.obs_ph: obs_target,
                   self.positive_model.obs_ph: obs_pos,
-                  self.negative_model.obs_ph: obs_neg}
+                  self.negative_model.obs_ph: obs_neg,
+                  self.mem_return_ph: true_returns_target}
+        # print(true_returns_target)
         if states is not None:
             td_map[self.train_model.states_ph] = states
             td_map[self.train_model.dones_ph] = masks
@@ -367,23 +417,26 @@ class PPO2Repr(ActorCriticRLModel):
             if self.full_tensorboard_log and (1 + update) % 10 == 0:
                 run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
                 run_metadata = tf.RunMetadata()
-                summary, repr_loss, policy_loss, value_loss, policy_entropy, approxkl, clipfrac, _ = self.sess.run(
-                    [self.summary, self.repr_loss, self.pg_loss, self.vf_loss, self.entropy, self.approxkl,
-                     self.clipfrac, self._train],
+                summary, repr_loss, contrastive_loss, atten_encoder_loss, atten_decoder_loss, policy_loss, value_loss, policy_entropy, approxkl, clipfrac, _, _ = self.sess.run(
+                    [self.summary, self.repr_loss, self.contrastive_loss, self.encoder_loss, self.decoder_loss,
+                     self.pg_loss, self.vf_loss, self.entropy, self.approxkl,
+                     self.clipfrac, self._train, self._repr_train],
                     td_map, options=run_options, run_metadata=run_metadata)
                 writer.add_run_metadata(run_metadata, 'step%d' % (update * update_fac))
             else:
-                summary, repr_loss, policy_loss, value_loss, policy_entropy, approxkl, clipfrac, _ = self.sess.run(
-                    [self.summary, self.repr_loss, self.pg_loss, self.vf_loss, self.entropy, self.approxkl,
-                     self.clipfrac, self._train],
+                summary, repr_loss, contrastive_loss, atten_encoder_loss, atten_decoder_loss, policy_loss, value_loss, policy_entropy, approxkl, clipfrac, _, _ = self.sess.run(
+                    [self.summary, self.repr_loss, self.contrastive_loss, self.encoder_loss, self.decoder_loss,
+                     self.pg_loss, self.vf_loss, self.entropy, self.approxkl,
+                     self.clipfrac, self._train, self._repr_train],
                     td_map)
             writer.add_summary(summary, (update * update_fac))
         else:
-            repr_loss, policy_loss, value_loss, policy_entropy, approxkl, clipfrac, _ = self.sess.run(
-                [self.repr_loss, self.pg_loss, self.vf_loss, self.entropy, self.approxkl, self.clipfrac, self._train],
+            repr_loss, contrastive_loss, atten_encoder_loss, atten_decoder_loss, policy_loss, value_loss, policy_entropy, approxkl, clipfrac, _, _ = self.sess.run(
+                [self.repr_loss, self.contrastive_loss, self.encoder_loss, self.decoder_loss, self.pg_loss,
+                 self.vf_loss, self.entropy, self.approxkl, self.clipfrac, self._train, self._repr_train],
                 td_map)
 
-        return repr_loss, policy_loss, value_loss, policy_entropy, approxkl, clipfrac
+        return repr_loss, contrastive_loss, atten_encoder_loss, atten_decoder_loss, policy_loss, value_loss, policy_entropy, approxkl, clipfrac
 
     def _finetune_step(self, learning_rate, cliprange, obs, returns, masks, actions, values, neglogpacs, update,
                        writer, states=None, cliprange_vf=None):
@@ -473,7 +526,7 @@ class PPO2Repr(ActorCriticRLModel):
             self._test_runner = self._make_test_runner()
         return self._test_runner
 
-    def eval(self, tb_log_name="PPO2", callback=None, print_attention_map=False, filedir=None):
+    def eval(self, tb_log_name="PPO2", callback=None, print_attention_map=False, filedir=None, mean_obs=None):
         new_tb_log = self._init_num_timesteps(False)
         callback = self._init_callback(callback)
         runner = self.test_runner  # run on eval env
@@ -506,10 +559,13 @@ class PPO2Repr(ActorCriticRLModel):
                 logger.dumpkvs()
 
             # save attention image
+            if mean_obs is not None:
+                obs = obs + mean_obs
             if print_attention_map:
                 rnd_indices = np.random.choice(len(obs), 5)
                 for i in range(len(rnd_indices)):
                     ind = rnd_indices[i]
+
                     self.save_attention(attention[ind], obs[ind], filedir, self.num_timesteps, i)
 
         callback.on_training_end()
@@ -525,7 +581,7 @@ class PPO2Repr(ActorCriticRLModel):
         attention = cv2.resize(attention, (obs.shape[0], obs.shape[1]))
 
         attention = np.repeat(attention[..., np.newaxis], 3, axis=2)
-        image = np.array(obs)[..., :3]
+        image = np.array(obs)[..., :3] * 255
         # print(image.shape)
         attentioned_image = image * attention
         if not os.path.isdir(subdir):
@@ -583,7 +639,17 @@ class PPO2Repr(ActorCriticRLModel):
                 rollout = runner.run(callback)
                 # Unpack
                 obs, returns, masks, actions, values, neglogpacs, states, ep_infos, true_reward, _ = rollout
-                true_returns = get_true_return(true_reward)
+                true_returns = get_true_return(true_reward, masks, self.n_envs)
+                if self.value_dict is not None:
+                    true_returns = np.array([self.value_dict.get(obs[i].data.tobytes(), np.nan) for i in range(len(obs))])
+                # print(true_returns)
+                predict_returns = self.sess.run(self.attention_model.mem_value_fn,
+                                                {self.attention_model.obs_ph: obs, self.action_ph: actions})
+                predict_returns = predict_returns.reshape(-1)
+                # print(predict_returns)
+                find_value_rate = (np.sum(np.isnan(true_returns))+0.0)/len(true_returns)
+                true_returns[np.isnan(true_returns)] = predict_returns[np.isnan(true_returns)]
+                # print(true_returns)
                 # Save
                 self.replay_buffer.add_batch(obs, actions, true_returns, masks)
 
@@ -608,7 +674,12 @@ class PPO2Repr(ActorCriticRLModel):
                             if not finetune:
                                 obs_t_batch, act_t_batch, rew_t_batch, obs_tp1_batch, done_mask_batch, obs_neg_batch = self.replay_buffer.sample(
                                     len(mbinds))
-                            slices = (arr[mbinds] for arr in (obs, returns, masks, actions, values, neglogpacs))
+                                # true_returns_slice = rew_t_batch
+                            true_returns_slice = true_returns[mbinds]
+
+                            slices = (arr[mbinds] for arr in
+                                      (obs, returns, masks, actions, values, neglogpacs))
+
                             if finetune:
                                 mb_loss_vals.append(
                                     self._finetune_step(lr_now, cliprange_now,
@@ -617,6 +688,7 @@ class PPO2Repr(ActorCriticRLModel):
                             else:
                                 mb_loss_vals.append(
                                     self._train_step(lr_now, cliprange_now, obs_t_batch, obs_tp1_batch, obs_neg_batch,
+                                                     true_returns_slice,
                                                      *slices, writer=writer,
                                                      update=timestep, cliprange_vf=cliprange_vf_now))
                 else:  # recurrent version
@@ -667,6 +739,7 @@ class PPO2Repr(ActorCriticRLModel):
                     logger.logkv("serial_timesteps" + suffix, update * self.n_steps)
                     logger.logkv("n_updates" + suffix, update)
                     logger.logkv("total_timesteps" + suffix, self.num_timesteps)
+                    logger.logkv("find_value_rate" + suffix, )
                     logger.logkv("fps" + suffix, fps)
                     logger.logkv("explained_variance" + suffix, float(explained_var))
                     if len(self.ep_info_buf) > 0 and len(self.ep_info_buf[0]) > 0:
@@ -683,6 +756,8 @@ class PPO2Repr(ActorCriticRLModel):
             return self
 
     def save(self, save_path, cloudpickle=False):
+
+        self.sess.run(self.magic_num.assign([142857]))
         data = {
             "gamma": self.gamma,
             "n_steps": self.n_steps,
@@ -709,6 +784,23 @@ class PPO2Repr(ActorCriticRLModel):
         params_to_save = self.get_parameters()
 
         self._save_to_file(save_path, data=data, params=params_to_save, cloudpickle=cloudpickle)
+
+    def act(self, obs, is_train=False):
+        action, value, self.initial_state, neglogp, attention_saved = self.step(obs, None, None, deterministic=is_train)
+        self.num_timesteps += 1
+        # print(neglogp)
+        # print(action)
+        print("action probability", self.act_model.proba_step(obs))
+        print("random action", action)
+        self.save_attention(attention_saved, obs[0], os.getenv('OPENAI_LOGDIR'), self.num_timesteps, 0)
+
+    # to be compatible
+    def observe(self, action, reward, obs, done, train=True):
+        return
+
+    def test_magic_num(self):
+        magic = self.sess.run(self.magic_num)
+        print("magic number:", magic)
 
 
 class Runner(AbstractEnvRunner):
@@ -745,7 +837,7 @@ class Runner(AbstractEnvRunner):
         mb_states = self.states
         ep_infos = []
         for _ in range(self.n_steps):
-            actions, values, self.states, neglogpacs,attention = self.model.step(self.obs, self.states, self.dones)
+            actions, values, self.states, neglogpacs, attention = self.model.step(self.obs, self.states, self.dones)
             mb_obs.append(self.obs.copy())
             mb_actions.append(actions)
             mb_values.append(values)
@@ -796,7 +888,7 @@ class Runner(AbstractEnvRunner):
             delta = mb_rewards[step] + self.gamma * nextvalues * nextnonterminal - mb_values[step]
             mb_advs[step] = last_gae_lam = delta + self.gamma * self.lam * nextnonterminal * last_gae_lam
         mb_returns = mb_advs + mb_values
-
+        # print(mb_rewards)
         mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, true_reward, mb_attention = \
             map(swap_and_flatten,
                 (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, true_reward, mb_attention))

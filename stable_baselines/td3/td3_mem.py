@@ -11,6 +11,7 @@ from stable_baselines.common.math_util import safe_mean, unscale_action, scale_a
 from stable_baselines.common.schedules import get_schedule_fn
 from stable_baselines.common.buffers import ReplayBuffer
 from stable_baselines.td3.policies import TD3Policy
+from stable_baselines.td3.episodic_memory import EpisodicMemory
 
 
 class TD3Mem(OffPolicyRLModel):
@@ -56,7 +57,8 @@ class TD3Mem(OffPolicyRLModel):
         If None, the number of cpu of the current machine will be used.
     """
 
-    def __init__(self, policy, memory, env, gamma=0.99, learning_rate=3e-4, buffer_size=50000,
+    def __init__(self, policy, env, gamma=0.99, learning_rate=3e-4,
+                 buffer_size=50000,
                  learning_starts=100, train_freq=100, gradient_steps=100, batch_size=128,
                  tau=0.005, policy_delay=2, action_noise=None,
                  target_policy_noise=0.2, target_noise_clip=0.5,
@@ -68,6 +70,7 @@ class TD3Mem(OffPolicyRLModel):
                                      policy_base=TD3Policy, requires_vec_env=False, policy_kwargs=policy_kwargs,
                                      seed=seed, n_cpu_tf_sess=n_cpu_tf_sess)
 
+        print("TD3 Memory Agent here")
         self.buffer_size = buffer_size
         self.learning_rate = learning_rate
         self.learning_starts = learning_starts
@@ -111,7 +114,15 @@ class TD3Mem(OffPolicyRLModel):
         self.policy_train_op = None
         self.policy_loss = None
 
-        self.memory = memory
+        self.memory = None
+        # self.state_repr_func = state_repr_func
+        # self.action_repr_func = action_repr_func
+        self.qf1_pi = None
+        self.qf1_target = None
+
+        self.state_repr_t = None
+        self.action_repr_t = None
+        self.sequence = []
         if _init_setup_model:
             self.setup_model()
 
@@ -129,6 +140,9 @@ class TD3Mem(OffPolicyRLModel):
                 self.sess = tf_util.make_session(num_cpu=self.n_cpu_tf_sess, graph=self.graph)
 
                 self.replay_buffer = ReplayBuffer(self.buffer_size)
+                self.memory = EpisodicMemory(self.buffer_size, state_dim=1, action_dim=1,
+                                             obs_shape=self.observation_space.shape,
+                                             action_shape=self.action_space.shape)
 
                 with tf.variable_scope("input", reuse=False):
                     # Create policy and target TF objects
@@ -160,6 +174,7 @@ class TD3Mem(OffPolicyRLModel):
                     # Q value when following the current policy
                     qf1_pi, _ = self.policy_tf.make_critics(self.processed_obs_ph,
                                                             policy_out, reuse=True)
+                    self.qf1_pi = qf1_pi
 
                 with tf.variable_scope("target", reuse=False):
                     # Create target networks
@@ -172,6 +187,7 @@ class TD3Mem(OffPolicyRLModel):
                     # Q values when following the target policy
                     qf1_target, qf2_target = self.target_policy_tf.make_critics(self.processed_next_obs_ph,
                                                                                 noisy_target_action)
+                    self.qf1_target = qf1_target
 
                 with tf.variable_scope("loss", reuse=False):
                     # Take the min of the two target Q-Values (clipped Double-Q Learning)
@@ -246,16 +262,20 @@ class TD3Mem(OffPolicyRLModel):
 
     def _train_step(self, step, writer, learning_rate, update_policy):
         # Sample a batch from the replay buffer
-        batch = self.replay_buffer.sample(self.batch_size, env=self._vec_normalize_env)
-        batch_obs, batch_actions, batch_rewards, batch_next_obs, batch_dones = batch
-
+        # batch = self.replay_buffer.sample(self.batch_size, env=self._vec_normalize_env)
+        batch = self.memory.sample(self.batch_size, mix=False)
+        if batch is None:
+            return 0, 0
+        batch_obs, batch_actions, batch_rewards, batch_next_obs, batch_dones, batch_returns = batch['obs0'], batch[
+            'actions'], batch['rewards'], batch['obs1'], batch['terminals1'], batch['return']
         feed_dict = {
             self.observations_ph: batch_obs,
             self.actions_ph: batch_actions,
             self.next_observations_ph: batch_next_obs,
             self.rewards_ph: batch_rewards.reshape(self.batch_size, -1),
             self.terminals_ph: batch_dones.reshape(self.batch_size, -1),
-            self.learning_rate_ph: learning_rate
+            self.learning_rate_ph: learning_rate,
+            self.qvalues_ph: batch_returns.reshape(self.batch_size, -1)
         }
 
         step_ops = self.step_ops
@@ -329,7 +349,6 @@ class TD3Mem(OffPolicyRLModel):
                         action = np.clip(action + self.action_noise(), -1, 1)
                     # Rescale from [-1, 1] to the correct bounds
                     unscaled_action = unscale_action(self.action_space, action)
-
                 assert action.shape == self.env.action_space.shape
 
                 new_obs, reward, done, info = self.env.step(unscaled_action)
@@ -352,6 +371,21 @@ class TD3Mem(OffPolicyRLModel):
 
                 # Store transition in the replay buffer.
                 self.replay_buffer_add(obs_, action, reward_, new_obs_, done, info)
+                self.sequence.append((obs_, action, self.state_repr_t, self.action_repr_t, reward_, None, False))
+                truly_done = info.get('truly_done', True)
+                if done:
+                    # action, q = self.pi(obs1, apply_noise=False, compute_Q=True)
+                    if truly_done:
+                        self.sequence.append(
+                            (new_obs_, action, self.state_repr_t, self.action_repr_t, 0, 0, done))
+                    else:
+                        q = self.sess.run(self.qf1_target, feed_dict={self.observations_ph: [new_obs_]})
+                        self.sequence.append(
+                            (new_obs_, action, self.state_repr_t, self.action_repr_t, 0, np.squeeze(q), done))
+                    # self.episodic_memory.update_sequence_iterate(self.sequence, self.k)
+                    self.memory.update_sequence_corrected(self.sequence)
+                    self.sequence = []
+
                 obs = new_obs
                 # Save the unnormalized observation
                 if self._vec_normalize_env is not None:

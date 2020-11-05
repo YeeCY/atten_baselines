@@ -11,10 +11,11 @@ from stable_baselines import logger, bench
 from stable_baselines.common.misc_util import set_global_seeds, boolean_flag
 from stable_baselines.ddpg.policies import MlpPolicy, LnMlpPolicy
 from stable_baselines import TD3
+from stable_baselines.td3.td3_mem import TD3Mem
 from stable_baselines.ddpg.noise import AdaptiveParamNoiseSpec, OrnsteinUhlenbeckActionNoise, NormalActionNoise
 
 
-def run(env_id, seed, noise_type, layer_norm, evaluation, **kwargs):
+def run(env_id, seed, noise_type, layer_norm, evaluation, model_type, **kwargs):
     """
     run the training of DDPG
 
@@ -79,8 +80,10 @@ def run(env_id, seed, noise_type, layer_norm, evaluation, **kwargs):
     num_timesteps = kwargs['num_timesteps']
     del kwargs['num_timesteps']
 
-    model = TD3(policy=policy, env=env,
-                action_noise=action_noise, buffer_size=int(1e6), verbose=2)
+    models = {"TD3": TD3, "TD3Mem": TD3Mem}
+    model_func = models.get(model_type, TD3)
+    model = model_func(policy=policy, env=env,
+                       action_noise=action_noise, buffer_size=int(1e5), verbose=2)
     model.learn(total_timesteps=num_timesteps)
     env.close()
     if eval_env is not None:
@@ -98,6 +101,7 @@ def parse_args():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     parser.add_argument('--env-id', type=str, default='Ant-v2')
+    parser.add_argument('--model-type', type=str, default='TD3')
     # boolean_flag(parser, 'render-eval', default=False)
     boolean_flag(parser, 'layer-norm', default=True)
     # boolean_flag(parser, 'render', default=False)

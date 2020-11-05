@@ -961,7 +961,7 @@ class ActorCriticRLModel(BaseRLModel):
         model.setup_model()
 
         model.load_parameters(params)
-
+        # print(params)
         return model
 
 

@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 import tensorflow as tf
+import tensorflow.contrib.layers as layers
 from gym.spaces import Discrete
 
 from stable_baselines.common.tf_util import batch_to_seq, seq_to_batch
@@ -53,11 +54,35 @@ def nature_cnn_exposed(scaled_images, **kwargs):
     :return: (TensorFlow Tensor) The CNN output layer
     """
     activ = tf.nn.relu
+
     layer_1 = activ(conv(scaled_images, 'c1', n_filters=32, filter_size=8, stride=4, init_scale=np.sqrt(2), **kwargs))
     layer_2 = activ(conv(layer_1, 'c2', n_filters=64, filter_size=4, stride=2, init_scale=np.sqrt(2), **kwargs))
     layer_3 = activ(conv(layer_2, 'c3', n_filters=64, filter_size=3, stride=1, init_scale=np.sqrt(2), **kwargs))
     # layer_3 = conv_to_fc(layer_3)
     return layer_3
+
+
+def attention_cnn_exposed(scaled_images, **kwargs):
+    out = scaled_images
+    with tf.variable_scope("convnet"):
+        # original architecture
+        # out = layers.convolution2d(out, num_outputs=32, kernel_size=8, stride=4, activation_fn=tf.nn.leaky_relu,
+        #                            padding='same')
+        # out = layers.convolution2d(out, num_outputs=64, kernel_size=4, stride=2, activation_fn=tf.nn.leaky_relu,
+        #                            padding='same')
+        # out = layers.convolution2d(out, num_outputs=64, kernel_size=3, stride=1, activation_fn=tf.nn.leaky_relu,
+        #                            padding='same')
+        out = tf.pad(out, tf.constant([[0, 0], [4, 4], [4, 4], [0, 0]]), "REFLECT")
+        out = layers.convolution2d(out, num_outputs=32, kernel_size=8, stride=4, activation_fn=tf.nn.leaky_relu,
+                                   padding='valid')
+        out = tf.pad(out, tf.constant([[0, 0], [2, 2], [2, 2], [0, 0]]), "REFLECT")
+        out = layers.convolution2d(out, num_outputs=64, kernel_size=4, stride=2, activation_fn=tf.nn.leaky_relu,
+                                   padding='valid')
+        out = tf.pad(out, tf.constant([[0, 0], [1, 1], [1, 1], [0, 0]]), "REFLECT")
+        out = layers.convolution2d(out, num_outputs=64, kernel_size=3, stride=1, activation_fn=tf.nn.leaky_relu,
+                                   padding='valid')
+
+    return out
 
 
 def mlp_extractor(flat_observations, net_arch, act_fun):
@@ -261,6 +286,7 @@ class ActorCriticPolicy(BasePolicy):
         self.pi_latent = None
         self.vf_latent = None
         self.attention = None
+        self.feature_map = None
         self._stop_gd_proba_distribution, self._stop_gd_policy, self.stop_gd_q_value, self._stop_gd_value_fn = None, None, None, None
 
     def _setup_init(self):

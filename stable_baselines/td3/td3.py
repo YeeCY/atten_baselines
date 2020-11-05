@@ -66,7 +66,7 @@ class TD3(OffPolicyRLModel):
         super(TD3, self).__init__(policy=policy, env=env, replay_buffer=None, verbose=verbose,
                                   policy_base=TD3Policy, requires_vec_env=False, policy_kwargs=policy_kwargs,
                                   seed=seed, n_cpu_tf_sess=n_cpu_tf_sess)
-
+        print("TD3 Agent here")
         self.buffer_size = buffer_size
         self.learning_rate = learning_rate
         self.learning_starts = learning_starts

@@ -748,10 +748,23 @@ class RandomBuffer(object):
             self.store_effect(idx, action, r, done)
 
 
-def get_true_return(rewards):
-    returns = []
-    rtn = 0
-    for r in reversed(rewards):
-        rtn += r
-        returns.append(rtn)
-    return list(reversed(returns))
+def get_true_return(rewards, dones, nenvs=1):
+    rewards = np.array(rewards).reshape(nenvs, -1)
+    dones = np.array(dones).reshape(nenvs, -1)
+
+    mb_returns = []
+    for i in range(nenvs):
+        returns = []
+        rtn = 0.
+        finished = False
+        for done,r in reversed(list(zip(dones[i], rewards[i]))):
+            if done:
+                rtn = 0
+                if not finished:
+                    returns = [np.nan for _ in range(len(returns))]
+                finished = True
+            rtn += r
+            returns.append(rtn)
+        mb_returns.append(list(reversed(returns)))
+    mb_returns = np.array(mb_returns).reshape(-1)
+    return mb_returns
