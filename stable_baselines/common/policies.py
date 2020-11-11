@@ -32,15 +32,19 @@ def nature_cnn(scaled_images, **kwargs):
 
 def attention_mask(feature_map, hard_mask=False):
     attention_feature_map = tf.reduce_mean(feature_map, axis=-1, keepdims=True)
-    attention = tf.nn.sigmoid(
-        conv(attention_feature_map, 'atten', n_filters=1, filter_size=1, stride=1, init_scale=np.sqrt(2)))
+    # attention = tf.nn.sigmoid(
+    #     conv(attention_feature_map, 'atten', n_filters=1, filter_size=1, stride=1, init_scale=np.sqrt(2)))
+    attention = layers.convolution2d(attention_feature_map, num_outputs=1, kernel_size=1, stride=1,
+                                     activation_fn=tf.nn.sigmoid,
+                                     padding='valid', weights_initializer=tf.contrib.layers.xavier_initializer(),
+                                     biases_initializer=tf.contrib.layers.xavier_initializer())
     if hard_mask:
         attention_max = tf.reduce_max(tf.reduce_max(attention, axis=1, keep_dims=True), axis=2, keep_dims=True)
         attention_min = tf.reduce_min(tf.reduce_min(attention, axis=1, keep_dims=True), axis=1, keep_dims=True)
         attention_normalized = (attention - attention_min) / (attention_max - attention_min + 1e-9)
-        feature_map_out = tf.multiply(attention_normalized, feature_map)
+        feature_map_out = tf.multiply(attention_normalized, attention_feature_map)
     else:
-        feature_map_out = tf.multiply(attention, feature_map)
+        feature_map_out = tf.multiply(attention, attention_feature_map)
 
     return conv_to_fc(attention), conv_to_fc(feature_map_out)
 
@@ -72,15 +76,18 @@ def attention_cnn_exposed(scaled_images, **kwargs):
         #                            padding='same')
         # out = layers.convolution2d(out, num_outputs=64, kernel_size=3, stride=1, activation_fn=tf.nn.leaky_relu,
         #                            padding='same')
-        out = tf.pad(out, tf.constant([[0, 0], [4, 4], [4, 4], [0, 0]]), "REFLECT")
-        out = layers.convolution2d(out, num_outputs=32, kernel_size=8, stride=4, activation_fn=tf.nn.leaky_relu,
-                                   padding='valid')
         out = tf.pad(out, tf.constant([[0, 0], [2, 2], [2, 2], [0, 0]]), "REFLECT")
-        out = layers.convolution2d(out, num_outputs=64, kernel_size=4, stride=2, activation_fn=tf.nn.leaky_relu,
-                                   padding='valid')
+        out = layers.convolution2d(out, num_outputs=32, kernel_size=8, stride=4, activation_fn=tf.nn.relu,
+                                   padding='valid', weights_initializer=tf.contrib.layers.xavier_initializer(),
+                                   biases_initializer=tf.contrib.layers.xavier_initializer())
         out = tf.pad(out, tf.constant([[0, 0], [1, 1], [1, 1], [0, 0]]), "REFLECT")
-        out = layers.convolution2d(out, num_outputs=64, kernel_size=3, stride=1, activation_fn=tf.nn.leaky_relu,
-                                   padding='valid')
+        out = layers.convolution2d(out, num_outputs=64, kernel_size=4, stride=2, activation_fn=tf.nn.relu,
+                                   padding='valid', weights_initializer=tf.contrib.layers.xavier_initializer(),
+                                   biases_initializer=tf.contrib.layers.xavier_initializer())
+        out = tf.pad(out, tf.constant([[0, 0], [1, 1], [1, 1], [0, 0]]), "REFLECT")
+        out = layers.convolution2d(out, num_outputs=64, kernel_size=3, stride=1, activation_fn=tf.nn.relu,
+                                   padding='valid', weights_initializer=tf.contrib.layers.xavier_initializer(),
+                                   biases_initializer=tf.contrib.layers.xavier_initializer())
 
     return out
 

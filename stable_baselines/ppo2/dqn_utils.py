@@ -757,7 +757,7 @@ def get_true_return(rewards, dones, nenvs=1):
         returns = []
         rtn = 0.
         finished = False
-        for done,r in reversed(list(zip(dones[i], rewards[i]))):
+        for done, r in reversed(list(zip(dones[i], rewards[i]))):
             if done:
                 rtn = 0
                 if not finished:

@@ -1,5 +1,38 @@
 import numpy as np
 import tensorflow as tf
+import math
+
+
+def uniform_init():
+    def _uniform_init(shape, *_, **_kwargs):
+
+        """Intialize weights as Orthogonal matrix.
+
+        Orthogonal matrix initialization [1]_. For n-dimensional shapes where
+        n > 2, the n-1 trailing axes are flattened. For convolutional layers, this
+        corresponds to the fan-in, so this makes the initialization usable for
+        both dense and convolutional layers.
+
+        References
+        ----------
+        .. [1] Saxe, Andrew M., James L. McClelland, and Surya Ganguli.
+               "Exact solutions to the nonlinear dynamics of learning in deep
+               linear
+        """
+        # lasagne ortho init for tf
+        shape = tuple(shape)
+        if len(shape) == 2 or len(shape) == 1:
+            flat_shape = shape
+        elif len(shape) == 4:  # assumes NHWC
+            flat_shape = (np.prod(shape[:-1]), shape[-1])
+        else:
+            raise NotImplementedError
+        stdv = 1. / math.sqrt(flat_shape[-1])
+        weights = np.random.uniform(-stdv, stdv, flat_shape)
+        weights = weights.reshape(shape)
+        return weights.astype(np.float32)
+
+    return _uniform_init
 
 
 def ortho_init(scale=1.0):
@@ -120,8 +153,8 @@ def linear(input_tensor, scope, n_hidden, *, init_scale=1.0, init_bias=0.0, reus
     """
     with tf.variable_scope(scope, reuse=reuse):
         n_input = input_tensor.get_shape()[1].value
-        weight = tf.get_variable("w", [n_input, n_hidden], initializer=ortho_init(init_scale))
-        bias = tf.get_variable("b", [n_hidden], initializer=tf.constant_initializer(init_bias))
+        weight = tf.get_variable("w", [n_input, n_hidden], initializer=uniform_init())
+        bias = tf.get_variable("b", [n_hidden], initializer=uniform_init())
         return tf.matmul(input_tensor, weight) + bias
 
 

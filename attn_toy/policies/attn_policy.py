@@ -27,6 +27,7 @@ class AttentionPolicy(ActorCriticPolicy):
                 feature_map = cnn_extractor(self.processed_obs, **kwargs)
                 attention, attentioned_feature_map = attention_mask(feature_map)
                 self._mem_value_fn = linear(attentioned_feature_map, 'mem_vf', 1)
+                self.contra_repr = linear(attentioned_feature_map, 'contra_repr', 32)
             # with tf.variable_scope("feature_value", reuse=False):
             #     feature_map_value = cnn_extractor(self.processed_obs, **kwargs)
             #     _, attentioned_feature_map_value = attention_mask(feature_map_value)
