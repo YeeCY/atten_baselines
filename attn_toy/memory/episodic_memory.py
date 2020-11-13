@@ -117,7 +117,7 @@ class EpisodicMemory(object):
             positives.append(int(positive))
             actions.append(action)
             rewards.append(self.rewards[ind, action])
-            returns.append(max(self.returns[ind, :]))
+            returns.append(self.returns[ind, :])
             dones.append(self.dones[ind, action])
 
         iters = 0

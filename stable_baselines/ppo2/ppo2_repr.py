@@ -57,7 +57,7 @@ class PPO2Repr(ActorCriticRLModel):
 
     def __init__(self, policy, env, test_env=None, gamma=0.99, n_steps=128, ent_coef=0.01, learning_rate=2.5e-4,
                  vf_coef=0.5,
-                 repr_coef=1., contra_coef=1., atten_encoder_coef=5 * 1. / 256, atten_decoder_coef=1e2,
+                 repr_coef=1., contra_coef=1., atten_encoder_coef=5 * 1. / 256, atten_decoder_coef=1.,
                  regularize_coef=1e-4,
                  max_grad_norm=0.5, lam=0.95, nminibatches=4, noptepochs=4, cliprange=0.2, cliprange_vf=None,
                  verbose=0, tensorboard_log=None, _init_setup_model=True, policy_kwargs=None,
@@ -117,7 +117,7 @@ class PPO2Repr(ActorCriticRLModel):
         self.positive_model = None
         self.negative_model = None
         self.attention_model = None
-
+        self.num_actions = 4
         # self.replay_buffer = EpisodicMemory(10000, env.observation_space.low.shape, env.action_space.n)
         self.replay_buffer = replay_buffer
 
@@ -198,7 +198,7 @@ class PPO2Repr(ActorCriticRLModel):
                     self.old_vpred_ph = tf.placeholder(tf.float32, [None], name="old_vpred_ph")
                     self.learning_rate_ph = tf.placeholder(tf.float32, [], name="learning_rate_ph")
                     self.clip_range_ph = tf.placeholder(tf.float32, [], name="clip_range_ph")
-                    self.mem_return_ph = tf.placeholder(tf.float32, [None], name="mem_return_ph")
+                    self.mem_return_ph = tf.placeholder(tf.float32, [None, self.num_actions], name="mem_return_ph")
 
                     neglogpac = train_model.proba_distribution.neglogp(self.action_ph)
                     neglogpac_stop_gd = train_model.stop_gd_proba_distribution.neglogp(self.action_ph)
@@ -314,8 +314,9 @@ class PPO2Repr(ActorCriticRLModel):
                             for var in self.params:
                                 tf.summary.histogram(var.name, var)
 
-                    l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in self.repr_params
-                                        if 'bias' not in v.name]) * self.regularize_coef
+                    l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in self.repr_params]) * self.regularize_coef
+                    # l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in self.repr_params
+                    #                     if 'bias' not in v.name]) * self.regularize_coef
                     grads = tf.gradients(ppo_loss, self.ppo_params)
                     if self.max_grad_norm is not None:
                         grads, _grad_norm = tf.clip_by_global_norm(grads, self.max_grad_norm)
@@ -332,7 +333,7 @@ class PPO2Repr(ActorCriticRLModel):
                     grads_stop_gd = list(zip(grads_stop_gd, self.params))
 
                 trainer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_ph, epsilon=1e-5)
-                repr_trainer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_ph, epsilon=2e-4)
+                repr_trainer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_ph, epsilon=1e-5)
                 finetuner = tf.train.AdamOptimizer(learning_rate=self.learning_rate_ph, epsilon=1e-5)
                 self._train = trainer.apply_gradients(grads)
                 self._repr_train = repr_trainer.apply_gradients(repr_grads)
@@ -433,23 +434,23 @@ class PPO2Repr(ActorCriticRLModel):
             if self.full_tensorboard_log and (1 + update) % 10 == 0:
                 run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
                 run_metadata = tf.RunMetadata()
-                summary, repr_loss, contrastive_loss, atten_encoder_loss, atten_decoder_loss, policy_loss, value_loss, policy_entropy, approxkl, clipfrac, _ = self.sess.run(
+                summary, repr_loss, contrastive_loss, atten_encoder_loss, atten_decoder_loss, policy_loss, value_loss, policy_entropy, approxkl, clipfrac, _, _ = self.sess.run(
                     [self.summary, self.repr_loss, self.contrastive_loss, self.encoder_loss, self.decoder_loss,
                      self.pg_loss, self.vf_loss, self.entropy, self.approxkl,
-                     self.clipfrac, self._repr_train],
+                     self.clipfrac, self._repr_train, self._train],
                     td_map, options=run_options, run_metadata=run_metadata)
                 writer.add_run_metadata(run_metadata, 'step%d' % (update * update_fac))
             else:
                 summary, repr_loss, contrastive_loss, atten_encoder_loss, atten_decoder_loss, policy_loss, value_loss, policy_entropy, approxkl, clipfrac, _, _ = self.sess.run(
                     [self.summary, self.repr_loss, self.contrastive_loss, self.encoder_loss, self.decoder_loss,
                      self.pg_loss, self.vf_loss, self.entropy, self.approxkl,
-                     self.clipfrac, self._repr_train],
+                     self.clipfrac, self._repr_train, self._train],
                     td_map)
             writer.add_summary(summary, (update * update_fac))
         else:
-            repr_loss, contrastive_loss, atten_encoder_loss, atten_decoder_loss, policy_loss, value_loss, policy_entropy, approxkl, clipfrac, _ = self.sess.run(
+            repr_loss, contrastive_loss, atten_encoder_loss, atten_decoder_loss, policy_loss, value_loss, policy_entropy, approxkl, clipfrac, _, _ = self.sess.run(
                 [self.repr_loss, self.contrastive_loss, self.encoder_loss, self.decoder_loss, self.pg_loss,
-                 self.vf_loss, self.entropy, self.approxkl, self.clipfrac, self._repr_train],
+                 self.vf_loss, self.entropy, self.approxkl, self.clipfrac, self._repr_train, self._train],
                 td_map)
 
         return repr_loss, contrastive_loss, atten_encoder_loss, atten_decoder_loss, policy_loss, value_loss, policy_entropy, approxkl, clipfrac
@@ -520,12 +521,14 @@ class PPO2Repr(ActorCriticRLModel):
 
     @staticmethod
     def emb_dist(emb1, emb2):
-        return tf.maximum(0., tf.sqrt(tf.reduce_sum(tf.square(emb1 - emb2), 1)))
+        return tf.maximum(0., tf.reduce_sum(tf.square(emb1 - emb2), axis=1))
 
     def contrastive_loss_fc(self, emb_cur, emb_next, emb_neq, margin=1., c_type='origin'):
         if c_type is None or c_type == 'origin':
             return tf.reduce_mean(
-                tf.maximum(self.emb_dist(emb_cur, emb_neq) - 2 * self.emb_dist(emb_cur, emb_next) + margin, 0))
+                tf.maximum(
+                    tf.sqrt(self.emb_dist(emb_cur, emb_neq)) - 2 * tf.sqrt(self.emb_dist(emb_cur, emb_next)) + margin,
+                    0))
         elif c_type == 'sqmargin':
             return tf.reduce_mean(self.emb_dist(emb_cur, emb_next) +
                                   tf.maximum(0.,
@@ -685,7 +688,7 @@ class PPO2Repr(ActorCriticRLModel):
                             end = start + batch_size
                             mbinds = inds[start:end]
                             if not finetune:
-                                obs_t_batch, act_t_batch, rew_t_batch, obs_tp1_batch, done_mask_batch, obs_neg_batch, return_t_batch = self.replay_buffer.sample(
+                                obs_t_batch, act_t_batch, rew_t_batch, obs_tp1_batch, done_mask_batch, obs_neg_batch, _ = self.replay_buffer.sample(
                                     len(mbinds))
                                 obs_value_batch, _, _, _, _, _, return_t_batch = self.replay_buffer.sample(
                                     len(mbinds))
@@ -693,7 +696,12 @@ class PPO2Repr(ActorCriticRLModel):
                                                                 {self.attention_model.obs_ph: obs_value_batch,
                                                                  self.action_ph: act_t_batch})
                                 predict_returns = predict_returns.reshape(-1)
+
+                                return_t_batch = np.array(return_t_batch)
+                                shape = return_t_batch.shape
+                                return_t_batch = return_t_batch.reshape(-1)
                                 return_t_batch[np.isinf(return_t_batch)] = predict_returns[np.isinf(return_t_batch)]
+                                return_t_batch = return_t_batch.reshape(shape)
 
                             slices = (arr[mbinds] for arr in
                                       (obs, returns, masks, actions, values, neglogpacs))
@@ -724,8 +732,16 @@ class PPO2Repr(ActorCriticRLModel):
                             mb_env_inds = env_indices[start:end]
                             mb_flat_inds = flat_indices[mb_env_inds].ravel()
                             if not finetune:
-                                obs_t_batch, act_t_batch, rew_t_batch, obs_tp1_batch, done_mask_batch, obs_neg_batch = self.replay_buffer.sample(
-                                    len(mb_flat_inds))
+                                obs_t_batch, act_t_batch, rew_t_batch, obs_tp1_batch, done_mask_batch, obs_neg_batch, _ = self.replay_buffer.sample(
+                                    len(mbinds))
+                                obs_value_batch, _, _, _, _, _, return_t_batch = self.replay_buffer.sample(
+                                    len(mbinds))
+                                predict_returns = self.sess.run(self.attention_model.mem_value_fn,
+                                                                {self.attention_model.obs_ph: obs_value_batch,
+                                                                 self.action_ph: act_t_batch})
+                                predict_returns = predict_returns.reshape(-1)
+                                return_t_batch[np.isinf(return_t_batch)] = predict_returns[np.isinf(return_t_batch)]
+
                             slices = (arr[mb_flat_inds] for arr in (obs, returns, masks, actions, values, neglogpacs))
                             mb_states = states[mb_env_inds]
                             if finetune:
@@ -738,7 +754,7 @@ class PPO2Repr(ActorCriticRLModel):
                             else:
                                 mb_loss_vals.append(
                                     self._train_step(lr_now, cliprange_now, obs_t_batch, obs_tp1_batch, obs_neg_batch,
-                                                     *slices, update=timestep,
+                                                     obs_value_batch, return_t_batch, *slices, update=timestep,
                                                      writer=writer, states=mb_states,
                                                      cliprange_vf=cliprange_vf_now))
 

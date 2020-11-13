@@ -83,7 +83,7 @@ def main():
     parser.add_argument('--finetune_num_timesteps', help='Policy architecture', type=int, default=131072)
     args = parser.parse_args()
     logger.configure()
-    replay_buffer = value_iteration(make_gridworld(noise_type=3, seed=args.seed)(), gamma=1)
+    replay_buffer = value_iteration(make_gridworld(noise_type=3, seed=args.seed)(), gamma=1,filedir="/data1/hh/attn/")
     env = SubprocVecEnv([make_gridworld(noise_type=3, seed=args.seed) for _ in range(args.n_env)])
     # env = VecFrameStack(make_atari_env(args.env, args.n_envs, args.seed), 4)
     test_env = SubprocVecEnv([make_gridworld(noise_type=3, seed=args.seed) for _ in range(args.n_env)])

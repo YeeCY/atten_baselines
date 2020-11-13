@@ -1,8 +1,16 @@
 import numpy as np
 from attn_toy.memory.episodic_memory import EpisodicMemory
+import pickle
+import os
 
 
-def value_iteration(env, gamma=0.99, buffer_size=10000):
+def value_iteration(env, gamma=0.99, buffer_size=2000, filedir=None):
+    if filedir is not None:
+        filename = os.path.join(filedir, "replay_buffer.pkl")
+        if os.path.exists(filename):
+            with open(filename, "rb") as file:
+                print("direct loading")
+                return pickle.load(file)
     num_state = env.state_space_capacity
     values = np.zeros(num_state)
     transition = np.zeros((num_state, env.action_space.n))
@@ -44,4 +52,13 @@ def value_iteration(env, gamma=0.99, buffer_size=10000):
     # print(env.color)
     # assert len(obses) == len(values)
     # value_dict = {obs.astype(np.uint8).data.tobytes(): 0.99 ** (100 - value) for obs, value in zip(obses, values)}
+    if filedir is not None:
+        file = os.path.join(filedir, "replay_buffer.pkl")
+        if not os.path.exists(file):
+            if not os.path.exists(filedir):
+                os.makedirs(filedir, exist_ok=True)
+            with open(os.path.join(filedir, "replay_buffer.pkl"), "wb") as file:
+                print("saving replaybuffer")
+                pickle.dump(replay_buffer, file)
+
     return replay_buffer
