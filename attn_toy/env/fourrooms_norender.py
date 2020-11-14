@@ -16,6 +16,11 @@ class Fourrooms(object):
     # observation : resultList[state]
     # small : 104 large 461
     def __init__(self, max_epilen=100):
+        self.init_basic(max_epilen)
+        self.viewer = Viewer(self.block_size * len(self.occupancy), self.block_size * len(self.occupancy[0]))
+        self.blocks = self.make_blocks()
+
+    def init_basic(self, max_epilen):
         self.layout = """\
         1111111111111
         1     1     1
@@ -31,16 +36,9 @@ class Fourrooms(object):
         1     1     1
         1111111111111
         """
-        self.init_basic(max_epilen)
-        self.viewer = Viewer(self.block_size * len(self.occupancy), self.block_size * len(self.occupancy[0]))
-        self.blocks = self.make_blocks()
-
-    def init_basic(self, max_epilen):
-
         self.block_size = 8
         self.occupancy = np.array(
-            [np.array(list(map(lambda c: 1 if c == '1' else 0, line))) for line in self.layout.splitlines()])
-        print(self.occupancy)
+            [list(map(lambda c: 1 if c == '1' else 0, line)) for line in self.layout.splitlines()])
         self.num_pos = int(np.sum(self.occupancy == 0))
         self.obs_height = self.block_size * len(self.occupancy)
         self.obs_width = self.block_size * len(self.occupancy[0])
@@ -57,10 +55,8 @@ class Fourrooms(object):
         self.semantics = dict()
         statenum = 0
         # print("Here", len(self.occupancy), len(self.occupancy[0]))
-        print(self.occupancy)
         for i in range(len(self.occupancy)):
             for j in range(len(self.occupancy[0])):
-                print(self.occupancy)
                 if self.occupancy[i, j] == 0:
                     self.tostate[(i, j)] = statenum
                     statenum += 1
@@ -222,21 +218,6 @@ class Fourrooms(object):
 
 class FourroomsNorender(Fourrooms):
     def __init__(self, max_epilen=100):
-        self.layout = """\
-        1111111111111
-        1     1     1
-        1     1     1
-        1           1
-        1     1     1
-        1     1     1
-        11 1111     1
-        1     111 111
-        1     1     1
-        1     1     1
-        1           1
-        1     1     1
-        1111111111111
-        """
         self.init_basic(max_epilen)
         self.blocks = self.make_blocks()
         self.background = self.render_with_blocks(np.zeros((self.obs_height, self.obs_width, 3), dtype=np.uint8),

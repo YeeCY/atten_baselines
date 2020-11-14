@@ -32,12 +32,12 @@ def nature_cnn(scaled_images, **kwargs):
 
 def attention_mask(feature_map, hard_mask=False):
     attention_feature_map = tf.reduce_mean(feature_map, axis=-1, keepdims=True)
-    # attention = tf.nn.sigmoid(
-    #     conv(attention_feature_map, 'atten', n_filters=1, filter_size=1, stride=1, init_scale=np.sqrt(2)))
-    attention = layers.convolution2d(attention_feature_map, num_outputs=1, kernel_size=1, stride=1,
-                                     activation_fn=tf.nn.sigmoid,
-                                     padding='valid', weights_initializer=tf.contrib.layers.xavier_initializer(),
-                                     biases_initializer=tf.contrib.layers.xavier_initializer())
+    attention = tf.nn.sigmoid(
+        conv(attention_feature_map, 'atten', n_filters=1, filter_size=1, stride=1, init_scale=np.sqrt(2)))
+    # attention = layers.convolution2d(attention_feature_map, num_outputs=1, kernel_size=1, stride=1,
+    #                                  activation_fn=tf.nn.sigmoid,
+    #                                  padding='valid', weights_initializer=tf.contrib.layers.xavier_initializer(),
+    #                                  biases_initializer=tf.contrib.layers.xavier_initializer())
     if hard_mask:
         attention_max = tf.reduce_max(tf.reduce_max(attention, axis=1, keep_dims=True), axis=2, keep_dims=True)
         attention_min = tf.reduce_min(tf.reduce_min(attention, axis=1, keep_dims=True), axis=1, keep_dims=True)
@@ -58,9 +58,11 @@ def nature_cnn_exposed(scaled_images, **kwargs):
     :return: (TensorFlow Tensor) The CNN output layer
     """
     activ = tf.nn.relu
-
+    scaled_images = tf.pad(scaled_images, tf.constant([[0, 0], [2, 2], [2, 2], [0, 0]]), "REFLECT")
     layer_1 = activ(conv(scaled_images, 'c1', n_filters=32, filter_size=8, stride=4, init_scale=np.sqrt(2), **kwargs))
+    layer_1 = tf.pad(layer_1, tf.constant([[0, 0], [2, 2], [2, 2], [0, 0]]), "REFLECT")
     layer_2 = activ(conv(layer_1, 'c2', n_filters=64, filter_size=4, stride=2, init_scale=np.sqrt(2), **kwargs))
+    layer_2 = tf.pad(layer_2, tf.constant([[0, 0], [2, 2], [2, 2], [0, 0]]), "REFLECT")
     layer_3 = activ(conv(layer_2, 'c3', n_filters=64, filter_size=3, stride=1, init_scale=np.sqrt(2), **kwargs))
     # layer_3 = conv_to_fc(layer_3)
     return layer_3

@@ -317,12 +317,12 @@ class PPO2Repr(ActorCriticRLModel):
                     l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in self.repr_params]) * self.regularize_coef
                     # l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in self.repr_params
                     #                     if 'bias' not in v.name]) * self.regularize_coef
-                    grads = tf.gradients(ppo_loss, self.ppo_params)
+                    grads = tf.gradients(ppo_loss, self.params)
                     if self.max_grad_norm is not None:
                         grads, _grad_norm = tf.clip_by_global_norm(grads, self.max_grad_norm)
-                    grads = list(zip(grads, self.ppo_params))
+                    grads = list(zip(grads, self.params))
 
-                    repr_grads = tf.gradients(self.repr_loss + l2_loss, self.repr_params)
+                    repr_grads = tf.gradients(self.repr_coef*(self.repr_loss + l2_loss), self.repr_params)
                     # if self.max_grad_norm is not None:
                     #     repr_grads, _repr_grad_norm = tf.clip_by_global_norm(repr_grads, self.max_grad_norm)
                     repr_grads = list(zip(repr_grads, self.repr_params))
@@ -434,7 +434,7 @@ class PPO2Repr(ActorCriticRLModel):
             if self.full_tensorboard_log and (1 + update) % 10 == 0:
                 run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
                 run_metadata = tf.RunMetadata()
-                summary, repr_loss, contrastive_loss, atten_encoder_loss, atten_decoder_loss, policy_loss, value_loss, policy_entropy, approxkl, clipfrac, _, _ = self.sess.run(
+                summary, repr_loss, contrastive_loss, atten_encoder_loss, atten_decoder_loss, policy_loss, value_loss, policy_entropy, approxkl, clipfrac, _, _= self.sess.run(
                     [self.summary, self.repr_loss, self.contrastive_loss, self.encoder_loss, self.decoder_loss,
                      self.pg_loss, self.vf_loss, self.entropy, self.approxkl,
                      self.clipfrac, self._repr_train, self._train],

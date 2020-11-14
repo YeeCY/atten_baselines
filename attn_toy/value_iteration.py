@@ -5,6 +5,7 @@ import os
 
 
 def value_iteration(env, gamma=0.99, buffer_size=2000, filedir=None):
+    # print(env.color)
     if filedir is not None:
         filename = os.path.join(filedir, "replay_buffer.pkl")
         if os.path.exists(filename):
