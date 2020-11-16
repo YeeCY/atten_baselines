@@ -3,7 +3,7 @@ from stable_baselines.common.policies import *
 
 class AttentionPolicy(ActorCriticPolicy):
     def __init__(self, sess, ob_space, ac_space, n_env, n_steps, n_batch, reuse=False, layers=None, net_arch=None,
-                 act_fun=tf.tanh, cnn_extractor=nature_cnn_exposed, feature_extraction="cnn", num_actions=4,
+                 act_fun=tf.tanh, cnn_extractor=attention_cnn_exposed, feature_extraction="cnn", num_actions=4,
                  **kwargs):
         super(AttentionPolicy, self).__init__(sess, ob_space, ac_space, n_env, n_steps, n_batch, reuse=reuse,
                                               scale=(feature_extraction == "cnn"))

@@ -35,29 +35,29 @@ def train(train_env, test_env, finetune_num_timesteps, num_timesteps, policy, nm
     policy = {'cnn': CnnPolicy, 'lstm': CnnLstmPolicy, 'lnlstm': CnnLnLstmPolicy, 'mlp': MlpPolicy,
               'attention': AttentionPolicy}[policy]
     # print(test_env)
-    model = PPO2(policy=policy, env=train_env, n_steps=n_steps, nminibatches=nminibatches,
-                 lam=0.95, gamma=0.99, noptepochs=4, ent_coef=.01,
-                 learning_rate=lambda f: f * 2.5e-4, cliprange=lambda f: f * 0.1, verbose=1)
+    # model = PPO2(policy=policy, env=train_env, n_steps=n_steps, nminibatches=nminibatches,
+    #              lam=0.95, gamma=0.99, noptepochs=4, ent_coef=.01,
+    #              learning_rate=lambda f: f * 2.5e-4, cliprange=lambda f: f * 0.1, verbose=1)
+    #
+    # model.learn(total_timesteps=num_timesteps)
+    model = PPO2Repr(policy=policy, env=train_env, test_env=test_env, n_steps=n_steps, nminibatches=nminibatches,
+                     lam=0.95, gamma=0.99, noptepochs=10, ent_coef=.01,
+                     learning_rate=lambda f: f * 2.5e-4, cliprange=lambda f: f * 0.1, verbose=1,
+                     replay_buffer=replay_buffer)
 
-    model.learn(total_timesteps=num_timesteps)
-    # model = PPO2Repr(policy=policy, env=train_env, test_env=test_env, n_steps=n_steps, nminibatches=nminibatches,
-    #                  lam=0.95, gamma=0.99, noptepochs=10, ent_coef=.01,
-    #                  learning_rate=lambda f: f * 2.5e-4, cliprange=lambda f: f * 0.1, verbose=1,
-    #                  replay_buffer=replay_buffer)
-    #
-    # for epoch in range(num_timesteps // test_interval):
-    #     model.learn(total_timesteps=test_interval, reset_num_timesteps=epoch == 0)
-    #     print(model.num_timesteps)
-    #     model.eval(print_attention_map=True, filedir=os.getenv('OPENAI_LOGDIR'))
-    #     print(model.num_timesteps)
-    #     save_path = os.path.join(os.getenv('OPENAI_LOGDIR'), "save")
-    #     if not os.path.isdir(save_path):
-    #         os.mkdir(save_path)
-    #     model.save(os.path.join(save_path, "model.pkl"))
-    #
-    # # finetune
-    # print("begin finetuning")
-    # model.learn(finetune_num_timesteps, finetune=True, reset_num_timesteps=True, begin_eval=True)
+    for epoch in range(num_timesteps // test_interval):
+        model.learn(total_timesteps=test_interval, reset_num_timesteps=epoch == 0)
+        print(model.num_timesteps)
+        model.eval(print_attention_map=True, filedir=os.getenv('OPENAI_LOGDIR'))
+        print(model.num_timesteps)
+        save_path = os.path.join(os.getenv('OPENAI_LOGDIR'), "save")
+        if not os.path.isdir(save_path):
+            os.mkdir(save_path)
+        model.save(os.path.join(save_path, "model.pkl"))
+
+    # finetune
+    print("begin finetuning")
+    model.learn(finetune_num_timesteps, finetune=True, reset_num_timesteps=True, begin_eval=True)
     train_env.close()
     test_env.close()
     # Free memory
@@ -89,7 +89,7 @@ def main():
     replay_buffer = value_iteration(make_gridworld(noise_type=3, seed=args.seed)(), gamma=1, filedir="/data1/hh/attn/")
     env = SubprocVecEnv([make_gridworld(noise_type=3, seed=args.seed) for _ in range(args.n_env)])
     # env = VecFrameStack(make_atari_env(args.env, args.n_envs, args.seed), 4)
-    test_env = SubprocVecEnv([make_gridworld(noise_type=3, seed=args.seed) for _ in range(args.n_env)])
+    test_env = SubprocVecEnv([make_gridworld(noise_type=4, seed=args.seed) for _ in range(args.n_env)])
     # print(test_env)
     train(env, test_env, finetune_num_timesteps=args.finetune_num_timesteps, num_timesteps=args.num_timesteps,
           policy=args.policy, replay_buffer=replay_buffer)
