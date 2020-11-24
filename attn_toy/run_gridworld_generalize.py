@@ -10,6 +10,8 @@ from stable_baselines.common.vec_env import VecFrameStack
 from stable_baselines.common.policies import CnnPolicy, CnnLstmPolicy, CnnLnLstmPolicy, MlpPolicy
 from attn_toy.env.noisy_fourrooms import FourroomsDynamicNoise3, FourroomsDynamicNoise2, FourroomsDynamicNoise, \
     ImageInputWarpper, FourroomsRandomNoise
+from attn_toy.env.fourrooms_withcoin import FourroomsCoin,FourroomsCoinDynamicNoise,FourroomsCoinNorender,\
+FourroomsCoinDynamicNoiseNorender
 from stable_baselines.common.vec_env import DummyVecEnv, SubprocVecEnv
 from attn_toy.policies.attn_policy import AttentionPolicy
 from attn_toy.value_iteration import value_iteration
@@ -73,7 +75,15 @@ def make_gridworld(noise_type=1, seed=0):
         return ImageInputWarpper(env(seed=seed))
 
     return env_fn
+#@auther:lzy
+def make_gridworld_withcoin(noise_type=1, seed=0):
+    envs = {1: FourroomsCoinNorender,2:FourroomsCoinDynamicNoiseNorender}
+    env = envs.get(noise_type, FourroomsCoinNorender)
 
+    def env_fn():
+        return ImageInputWarpper(env())
+
+    return env_fn
 
 def main():
     """
@@ -86,11 +96,17 @@ def main():
     parser.add_argument('--finetune_num_timesteps', help='Policy architecture', type=int, default=131072)
     args = parser.parse_args()
     logger.configure()
-    replay_buffer = value_iteration(make_gridworld(noise_type=3, seed=args.seed)(), gamma=1, filedir="/data1/hh/attn/")
-    env = SubprocVecEnv([make_gridworld(noise_type=3, seed=args.seed) for _ in range(args.n_env)])
-    # env = VecFrameStack(make_atari_env(args.env, args.n_envs, args.seed), 4)
-    test_env = SubprocVecEnv([make_gridworld(noise_type=4, seed=args.seed) for _ in range(args.n_env)])
+
+    #replay_buffer = value_iteration(make_gridworld(noise_type=3, seed=args.seed)(), gamma=1, filedir="/home/lzy/attn/")
+    #env = SubprocVecEnv([make_gridworld(noise_type=3, seed=args.seed) for _ in range(args.n_env)])
+    # #env = VecFrameStack(make_atari_env(args.env, args.n_envs, args.seed), 4)
+    #test_env = SubprocVecEnv([make_gridworld(noise_type=4, seed=args.seed) for _ in range(args.n_env)])
     # print(test_env)
+    ##begin
+    replay_buffer = value_iteration(make_gridworld_withcoin(noise_type=1, seed=args.seed)(), gamma=1, filedir="/home/lzy/attn_2/")
+    env = SubprocVecEnv([make_gridworld_withcoin(noise_type=1, seed=args.seed) for _ in range(args.n_env)])
+    test_env = SubprocVecEnv([make_gridworld_withcoin(noise_type=2, seed=args.seed) for _ in range(args.n_env)])
+    #end
     train(env, test_env, finetune_num_timesteps=args.finetune_num_timesteps, num_timesteps=args.num_timesteps,
           policy=args.policy, replay_buffer=replay_buffer)
 

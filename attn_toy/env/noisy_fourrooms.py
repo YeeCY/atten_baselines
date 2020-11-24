@@ -11,6 +11,7 @@ class ImageInputWarpper(gym.Wrapper):
         screen_height = self.env.obs_height
         screen_width = self.env.obs_width
         self.observation_space = spaces.Box(low=0, high=255, shape=(screen_height, screen_width, 3), dtype=np.uint8)
+        #print(self.observation_space)
         # self.num_steps = 0
         self.max_steps = max_steps
         # self.state_space_capacity = self.env.state_space_capacity
@@ -22,6 +23,7 @@ class ImageInputWarpper(gym.Wrapper):
         if self.num_steps >= self.max_steps:
             done = True
         obs = self.env.render(state)
+        #print(obs.shape)correct
         # print("step reporting",done)
         # if self.mean_obs is None:
         #     self.mean_obs = np.mean(obs)

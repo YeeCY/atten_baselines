@@ -5,7 +5,7 @@ from gym import error, spaces
 from gym import core, spaces
 from gym.envs.registration import register
 import random
-# from attn_toy.env.rendering import *
+#from attn_toy.env.rendering import *
 from copy import copy
 
 
@@ -36,7 +36,7 @@ class Fourrooms(object):
         self.blocks = self.make_blocks()
 
     def init_basic(self, max_epilen):
-
+	###init layout,action space
         self.block_size = 8
         self.occupancy = np.array(
             [np.array(list(map(lambda c: 1 if c == '1' else 0, line))) for line in self.layout.splitlines()])
@@ -52,12 +52,13 @@ class Fourrooms(object):
         self.directions = [np.array((-1, 0)), np.array((1, 0)), np.array((0, -1)), np.array((0, 1))]
         # self.rng = np.random.RandomState(1234)
 
-        self.rand_color = np.random.randint(0, 255, (200, 3))
+        self.rand_color = np.random.randint(0, 255, (200, 3))#low,high,size
         self.tostate = {}
         self.semantics = dict()
         statenum = 0
         # print("Here", len(self.occupancy), len(self.occupancy[0]))
         # print(self.occupancy)
+        ###label states
         for i in range(len(self.occupancy)):
             for j in range(len(self.occupancy[0])):
                 # print(self.occupancy)
@@ -67,7 +68,7 @@ class Fourrooms(object):
         self.tocell = {v: k for k, v in self.tostate.items()}
 
         self.goal = 62
-
+	
         self.init_states = list(range(self.observation_space.n))
         self.init_states.remove(self.goal)
         # random encode
@@ -105,6 +106,7 @@ class Fourrooms(object):
         assert all([int(ob) in self.mapping for ob in obs]), "what happened? " + info
 
     def empty_around(self, cell):
+	#return all available cells around
         avail = []
         for action in range(self.action_space.n):
             nextcell = tuple(cell + self.directions[action])
@@ -141,9 +143,9 @@ class Fourrooms(object):
         except TypeError:
             nextcell = tuple(self.currentcell + self.directions[action[0]])
 
-        if not self.occupancy[nextcell]:
+        if not self.occupancy[nextcell]:#!=1
             self.currentcell = nextcell
-            if np.random.uniform() < 0.:
+            if np.random.uniform() < 0.:#impossible??
                 # if self.rng.uniform() < 1/3.:
                 empty_cells = self.empty_around(self.currentcell)
                 # self.currentcell = empty_cells[self.rng.randint(len(empty_cells))]
@@ -170,6 +172,7 @@ class Fourrooms(object):
         return np.array(self.mapping[state]), reward, self.done, info
 
     def get_dict(self):
+	###label positions of states in self.dict
         count = 0
         for i in range(self.Row):
             for j in range(self.Col):
@@ -244,8 +247,10 @@ class FourroomsNorender(Fourrooms):
             self.blocks)
         # print(self.background.shape)
 
-    def render(self, mode=0):
-        blocks = []
+    def render(self, mode=0,blocks=[]):
+        """
+        render currentcell\walls\background,you can add blocks by parameter
+        """
         if self.currentcell[0] > 0:
             x, y = self.currentcell
             # state = self.tostate[self.currentcell]
@@ -261,7 +266,7 @@ class FourroomsNorender(Fourrooms):
 
         return arr
 
-    def render_with_blocks(self, background, blocks):
+    def render_with_blocks(self, background:"array with dim[-1]==3", blocks:"list of tuples")->np.array:
         background = np.copy(np.array(background))
         assert background.shape[-1] == len(background.shape) == 3, background.shape
         for block in blocks:
@@ -272,6 +277,7 @@ class FourroomsNorender(Fourrooms):
         return background
 
     def make_blocks(self):
+
         blocks = []
         size = self.block_size
         for i, row in enumerate(self.occupancy):
@@ -296,3 +302,5 @@ class FourroomsNorender(Fourrooms):
 #     timestep_limit=20000,
 #     reward_threshold=1,
 # )
+if __name__=='__main__':
+	tmp=FourroomsNorender()
