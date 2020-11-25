@@ -1,12 +1,56 @@
 #!/usr/bin/env python3
-
+import os
 from stable_baselines import logger, A2C
-from stable_baselines.common.cmd_util import make_atari_env, atari_arg_parser
+from stable_baselines.common.cmd_util import make_atari, Monitor, wrap_deepmind, set_global_seeds, DummyVecEnv, \
+    SubprocVecEnv, atari_arg_parser
 from stable_baselines.common.vec_env import VecFrameStack
 from stable_baselines.common.policies import CnnPolicy, CnnLstmPolicy, CnnLnLstmPolicy
+from stable_baselines.a2c.rlgan_warpper import AtariRescale42x42
 
 
-def train(env_id, num_timesteps, seed, policy, lr_schedule, num_env):
+def make_atari_env(env_id, num_env, seed, wrapper_kwargs=None,
+                   start_index=0, allow_early_resets=True,
+                   start_method=None, use_subprocess=False, variation="constant_rectangle"):
+    """
+    Create a wrapped, monitored VecEnv for Atari.
+
+    :param env_id: (str) the environment ID
+    :param num_env: (int) the number of environment you wish to have in subprocesses
+    :param seed: (int) the initial seed for RNG
+    :param wrapper_kwargs: (dict) the parameters for wrap_deepmind function
+    :param start_index: (int) start rank index
+    :param allow_early_resets: (bool) allows early reset of the environment
+    :param start_method: (str) method used to start the subprocesses.
+        See SubprocVecEnv doc for more information
+    :param use_subprocess: (bool) Whether to use `SubprocVecEnv` or `DummyVecEnv` when
+        `num_env` > 1, `DummyVecEnv` is usually faster. Default: False
+    :return: (VecEnv) The atari environment
+    """
+    if wrapper_kwargs is None:
+        wrapper_kwargs = {}
+
+    def make_env(rank):
+        def _thunk():
+            env = make_atari(env_id)
+            env.seed(seed + rank)
+            env = Monitor(env, logger.get_dir() and os.path.join(logger.get_dir(), str(rank)),
+                          allow_early_resets=allow_early_resets)
+            env = AtariRescale42x42(env, variation)
+            return wrap_deepmind(env, **wrapper_kwargs)
+
+        return _thunk
+
+    set_global_seeds(seed)
+
+    # When using one environment, no need to start subprocesses
+    if num_env == 1 or not use_subprocess:
+        return DummyVecEnv([make_env(i + start_index) for i in range(num_env)])
+
+    return SubprocVecEnv([make_env(i + start_index) for i in range(num_env)],
+                         start_method=start_method)
+
+
+def train(env_id, num_timesteps, seed, policy, lr_schedule, num_env, variation, load_path, save_interval=100000):
     """
     Train A2C model for atari environment, for testing purposes
 
@@ -28,10 +72,22 @@ def train(env_id, num_timesteps, seed, policy, lr_schedule, num_env):
     if policy_fn is None:
         raise ValueError("Error: policy {} not implemented".format(policy))
 
-    env = VecFrameStack(make_atari_env(env_id, num_env, seed), 4)
+    env = VecFrameStack(make_atari_env(env_id, num_env, seed, variation=variation), 4)
 
-    model = A2C(policy_fn, env, lr_schedule=lr_schedule, seed=seed)
-    model.learn(total_timesteps=int(num_timesteps * 1.1))
+    if load_path is None:
+        model = A2C(policy_fn, env, lr_schedule=lr_schedule, seed=seed,verbose=1)
+    else:
+        model = A2C.load(load_path=load_path)
+        model.set_env(env)
+        print("load model successfully")
+    for epoch in range(num_timesteps // save_interval):
+        model.learn(total_timesteps=save_interval, reset_num_timesteps=epoch == 0)
+        print(model.num_timesteps)
+        save_path = os.path.join(os.getenv('OPENAI_LOGDIR'), "save")
+        if not os.path.isdir(save_path):
+            os.mkdir(save_path)
+        model.save(os.path.join(save_path, "model_{}.pkl".format((epoch + 1) * save_interval)))
+    # model.learn(total_timesteps=int(num_timesteps * 1.1))
     env.close()
 
 
@@ -41,12 +97,17 @@ def main():
     """
     parser = atari_arg_parser()
     parser.add_argument('--policy', choices=['cnn', 'lstm', 'lnlstm'], default='cnn', help='Policy architecture')
+    parser.add_argument('--variation',
+                        choices=['standard', 'moving-square', 'constant-rectangle', 'green-lines', 'diagonals'],
+                        default='standard', help='Env variation')
     parser.add_argument('--lr_schedule', choices=['constant', 'linear'], default='constant',
                         help='Learning rate schedule')
+    parser.add_argument('--load-path', type=str, default=None,
+                        help='Path to load model')
     args = parser.parse_args()
     logger.configure()
     train(args.env, num_timesteps=args.num_timesteps, seed=args.seed, policy=args.policy, lr_schedule=args.lr_schedule,
-          num_env=16)
+          num_env=16, variation=args.variation, load_path=args.load_path)
 
 
 if __name__ == '__main__':

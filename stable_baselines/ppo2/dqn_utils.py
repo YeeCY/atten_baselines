@@ -761,7 +761,7 @@ def get_true_return(rewards, dones, nenvs=1):
             if done:
                 rtn = 0
                 if not finished:
-                    returns = [np.nan for _ in range(len(returns))]
+                    returns = [-np.inf for _ in range(len(returns))]
                 finished = True
             rtn += r
             returns.append(rtn)

@@ -275,7 +275,7 @@ class A2C(ActorCriticRLModel):
                                                                  self.num_timesteps // self.n_batch, writer)
                 n_seconds = time.time() - t_start
                 fps = int((update * self.n_batch) / n_seconds)
-
+                # print("test tensorboard",self.tensorboard_log,writer)
                 if writer is not None:
                     total_episode_reward_logger(self.episode_reward,
                                                 true_reward.reshape((self.n_envs, self.n_steps)),

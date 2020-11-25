@@ -1,0 +1,3 @@
+OPENAI_LOGDIR=/data1/hh/attn/run python run_gridworld_generalize.py
+
+OPENAI_LOGDIR=/data1/hh/attn/run python run_debug.py  --load_path=/data1/hh/attn/confirm_generalizaton_11/save/model.pkl

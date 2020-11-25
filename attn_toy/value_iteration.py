@@ -11,7 +11,9 @@ def value_iteration(env, gamma=0.99, buffer_size=2000, filedir=None):
         if os.path.exists(filename):
             with open(filename, "rb") as file:
                 print("direct loading")
-                return pickle.load(file)
+                replay_buffer = pickle.load(file)
+                replay_buffer.gamma = 1
+                return replay_buffer
     num_state = env.state_space_capacity
     values = np.zeros(num_state)
     transition = np.zeros((num_state, env.action_space.n))
@@ -43,7 +45,7 @@ def value_iteration(env, gamma=0.99, buffer_size=2000, filedir=None):
             values[s] = np.max(Q[s])
     # print(rewards)
     # print(transition)
-    replay_buffer = EpisodicMemory(buffer_size, env.observation_space.shape, env.action_space.n)
+    replay_buffer = EpisodicMemory(buffer_size, env.observation_space.shape, env.action_space.n,gamma=0.99)
     for s in range(num_state):
         for a in range(env.action_space.n):
             replay_buffer.store(obses[s], a, rewards[s, a], dones[s, a], 0.99 ** (100 - Q[s, a]),

@@ -9,11 +9,12 @@ def np_hash(array):
 
 # All the same as replay buffer except that it will not restore the same state more than once
 class EpisodicMemory(object):
-    def __init__(self, capacity, obs_shape, num_actions, hash_func=np_hash):
+    def __init__(self, capacity, obs_shape, num_actions, hash_func=np_hash, gamma=1):
         self.hash_func = hash_func
         self.capacity = capacity
         self.obs_shape = obs_shape
         self.num_actions = num_actions
+        self.gamma = gamma
 
         self.obs = np.empty((capacity,) + obs_shape, dtype=np.uint8)
         self.rewards = np.zeros((capacity, num_actions))
@@ -56,6 +57,7 @@ class EpisodicMemory(object):
 
     def store(self, obs, action, reward, done, rtn, obs_tp1=None):
 
+        # done = reward == 100  # an ad-hoc solution
         index = self.get_index(obs)
         if obs_tp1 is not None:
             index_tp1 = self.get_index(obs_tp1)
@@ -69,6 +71,11 @@ class EpisodicMemory(object):
             self.returns[index, action] = max(rtn, self.returns[index, action])
         if index_tp1 >= 0:
             self.next_id[index, action] = index_tp1
+            # max_next = reward + self.gamma * (1. - float(done)) * np.max(self.returns[index_tp1])
+            # # print(done,max_next)
+            # if not np.isnan(max_next):
+            #     self.returns[index, action] = max(max_next,
+            #                                       self.returns[index, action])
 
     def add_batch(self, obs, actions, rewards, returns, dones):
         for ob, action, r, Rtn, done, obs_tp1 in zip(obs, actions, rewards, returns, dones, list(obs[1:]) + [None]):

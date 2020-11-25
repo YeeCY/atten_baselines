@@ -4,6 +4,7 @@ from stable_baselines.common.policies import *
 class AttentionPolicy(ActorCriticPolicy):
     def __init__(self, sess, ob_space, ac_space, n_env, n_steps, n_batch, reuse=False, layers=None, net_arch=None,
                  act_fun=tf.tanh, cnn_extractor=attention_cnn_exposed, feature_extraction="cnn", num_actions=4,
+                 add_attention=False,
                  **kwargs):
         super(AttentionPolicy, self).__init__(sess, ob_space, ac_space, n_env, n_steps, n_batch, reuse=reuse,
                                               scale=(feature_extraction == "cnn"))
@@ -27,18 +28,23 @@ class AttentionPolicy(ActorCriticPolicy):
             with tf.variable_scope("feature", reuse=False):
                 feature_map = cnn_extractor(self.processed_obs, **kwargs)
                 attention, attentioned_feature_map = attention_mask(feature_map)
-                self._mem_value_fn = linear(attentioned_feature_map, 'mem_vf', num_actions, init_scale=np.sqrt(2))
-                self.contra_repr = linear(attentioned_feature_map, 'contra_repr', 32, init_scale=np.sqrt(2))
+                reduced_feature_map =conv_to_fc(tf.reduce_mean(feature_map, axis=-1, keepdims=False))
+                if add_attention:
+                    used_feature_map = attentioned_feature_map
+                else:
+                    used_feature_map = reduced_feature_map
+                self._mem_value_fn = linear(used_feature_map, 'mem_vf', num_actions, init_scale=np.sqrt(2))
+                self.contra_repr = linear(used_feature_map, 'contra_repr', 32, init_scale=np.sqrt(2))
             # with tf.variable_scope("feature_value", reuse=False):
             #     feature_map_value = cnn_extractor(self.processed_obs, **kwargs)
             #     _, attentioned_feature_map_value = attention_mask(feature_map_value)
             with tf.variable_scope("last_layer", reuse=False):
                 pi_latent = tf.nn.relu(
-                    linear(attentioned_feature_map, 'pi_latent', n_hidden=512, init_scale=np.sqrt(2)))
-
+                    linear(used_feature_map, 'pi_latent', n_hidden=512, init_scale=np.sqrt(2)))
                 # vf_latent = tf.nn.relu(linear(attentioned_feature_map_value, 'vi_latent', n_hidden=512, init_scale=np.sqrt(2)))
                 vf_latent = pi_latent
                 self.unattended_feature_map = feature_map
+                self.reduced_feature_map = reduced_feature_map
                 self.feature_map = attentioned_feature_map
                 self.attention = attention
                 self.pi_latent = pi_latent
@@ -84,7 +90,7 @@ class AttentionPolicy(ActorCriticPolicy):
             return random_action
 
     def proba_step(self, obs, state=None, mask=None):
-        return self.sess.run(self.policy_proba, {self.obs_ph: obs})
+        return self.sess.run([self.policy_proba,self.policy], {self.obs_ph: obs})
 
     def value(self, obs, state=None, mask=None):
         return self.sess.run(self.value_flat, {self.obs_ph: obs})

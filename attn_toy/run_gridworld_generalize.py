@@ -9,11 +9,12 @@ from stable_baselines.common.cmd_util import make_atari_env, atari_arg_parser
 from stable_baselines.common.vec_env import VecFrameStack
 from stable_baselines.common.policies import CnnPolicy, CnnLstmPolicy, CnnLnLstmPolicy, MlpPolicy
 from attn_toy.env.noisy_fourrooms import FourroomsDynamicNoise3, FourroomsDynamicNoise2, FourroomsDynamicNoise, \
-    ImageInputWarpper, FourroomsRandomNoise
+    ImageInputWarpper, FourroomsRandomNoise, FourroomsOptimalNoise, FourroomsMyNoise
 from stable_baselines.common.vec_env import DummyVecEnv, SubprocVecEnv
 from attn_toy.policies.attn_policy import AttentionPolicy
 from attn_toy.value_iteration import value_iteration
 import os
+import numpy as np
 
 
 def train(train_env, test_env, finetune_num_timesteps, num_timesteps, policy, nminibatches=4, n_steps=128,
@@ -46,7 +47,8 @@ def train(train_env, test_env, finetune_num_timesteps, num_timesteps, policy, nm
                      replay_buffer=replay_buffer)
 
     for epoch in range(num_timesteps // test_interval):
-        model.learn(total_timesteps=test_interval, reset_num_timesteps=epoch == 0)
+        model.learn(total_timesteps=test_interval, reset_num_timesteps=epoch == 0, begin_eval=epoch == 0,
+                    print_attention_map=epoch % 10 == 0)
         print(model.num_timesteps)
         model.eval(print_attention_map=True, filedir=os.getenv('OPENAI_LOGDIR'))
         print(model.num_timesteps)
@@ -64,13 +66,16 @@ def train(train_env, test_env, finetune_num_timesteps, num_timesteps, policy, nm
     del model
 
 
-def make_gridworld(noise_type=1, seed=0):
+def make_gridworld(noise_type=1, seed=0, optimal_action=None):
     envs = {1: FourroomsDynamicNoise, 2: FourroomsDynamicNoise2, 3: FourroomsDynamicNoise3,
-            4: FourroomsRandomNoise}
-    env = envs.get(noise_type, FourroomsDynamicNoise)
+            4: FourroomsRandomNoise, 5: FourroomsOptimalNoise, 6: FourroomsMyNoise}
+    env = envs.get(noise_type, FourroomsOptimalNoise)
 
     def env_fn():
-        return ImageInputWarpper(env(seed=seed))
+        if noise_type > 3:
+            return ImageInputWarpper(env(seed=seed, optimal_action=optimal_action))
+        else:
+            return ImageInputWarpper(env(seed=seed))
 
     return env_fn
 
@@ -86,10 +91,14 @@ def main():
     parser.add_argument('--finetune_num_timesteps', help='Policy architecture', type=int, default=131072)
     args = parser.parse_args()
     logger.configure()
-    replay_buffer = value_iteration(make_gridworld(noise_type=3, seed=args.seed)(), gamma=1, filedir="/data1/hh/attn/")
-    env = SubprocVecEnv([make_gridworld(noise_type=3, seed=args.seed) for _ in range(args.n_env)])
+    print("seed:", args.seed)
+    replay_buffer = value_iteration(make_gridworld(noise_type=3, seed=args.seed)(), gamma=1, filedir="/home/hh/attn/")
+    optimal_action = np.argmax(replay_buffer.returns[:replay_buffer.curr_capacity], axis=1)
+    env = SubprocVecEnv(
+        [make_gridworld(noise_type=5, seed=args.seed, optimal_action=optimal_action) for _ in range(args.n_env)])
     # env = VecFrameStack(make_atari_env(args.env, args.n_envs, args.seed), 4)
-    test_env = SubprocVecEnv([make_gridworld(noise_type=4, seed=args.seed) for _ in range(args.n_env)])
+    test_env = SubprocVecEnv(
+        [make_gridworld(noise_type=6, seed=args.seed, optimal_action=optimal_action) for _ in range(args.n_env)])
     # print(test_env)
     train(env, test_env, finetune_num_timesteps=args.finetune_num_timesteps, num_timesteps=args.num_timesteps,
           policy=args.policy, replay_buffer=replay_buffer)

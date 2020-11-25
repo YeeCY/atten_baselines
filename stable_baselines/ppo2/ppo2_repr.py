@@ -57,7 +57,7 @@ class PPO2Repr(ActorCriticRLModel):
 
     def __init__(self, policy, env, test_env=None, gamma=0.99, n_steps=128, ent_coef=0.01, learning_rate=2.5e-4,
                  vf_coef=0.5,
-                 repr_coef=1., contra_coef=1., atten_encoder_coef=5 * 1. / 256, atten_decoder_coef=1.,
+                 repr_coef=0., contra_coef=1., atten_encoder_coef=5 * 1. / 256, atten_decoder_coef=1.,
                  regularize_coef=1e-4,
                  max_grad_norm=0.5, lam=0.95, nminibatches=4, noptepochs=4, cliprange=0.2, cliprange_vf=None,
                  verbose=0, tensorboard_log=None, _init_setup_model=True, policy_kwargs=None,
@@ -322,7 +322,7 @@ class PPO2Repr(ActorCriticRLModel):
                         grads, _grad_norm = tf.clip_by_global_norm(grads, self.max_grad_norm)
                     grads = list(zip(grads, self.params))
 
-                    repr_grads = tf.gradients(self.repr_coef*(self.repr_loss + l2_loss), self.repr_params)
+                    repr_grads = tf.gradients(self.repr_coef * (self.repr_loss + l2_loss), self.repr_params)
                     # if self.max_grad_norm is not None:
                     #     repr_grads, _repr_grad_norm = tf.clip_by_global_norm(repr_grads, self.max_grad_norm)
                     repr_grads = list(zip(repr_grads, self.repr_params))
@@ -434,7 +434,7 @@ class PPO2Repr(ActorCriticRLModel):
             if self.full_tensorboard_log and (1 + update) % 10 == 0:
                 run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
                 run_metadata = tf.RunMetadata()
-                summary, repr_loss, contrastive_loss, atten_encoder_loss, atten_decoder_loss, policy_loss, value_loss, policy_entropy, approxkl, clipfrac, _, _= self.sess.run(
+                summary, repr_loss, contrastive_loss, atten_encoder_loss, atten_decoder_loss, policy_loss, value_loss, policy_entropy, approxkl, clipfrac, _, _ = self.sess.run(
                     [self.summary, self.repr_loss, self.contrastive_loss, self.encoder_loss, self.decoder_loss,
                      self.pg_loss, self.vf_loss, self.entropy, self.approxkl,
                      self.clipfrac, self._repr_train, self._train],
@@ -545,7 +545,7 @@ class PPO2Repr(ActorCriticRLModel):
             self._test_runner = self._make_test_runner()
         return self._test_runner
 
-    def eval(self, tb_log_name="PPO2", callback=None, print_attention_map=False, filedir=None, mean_obs=None):
+    def eval(self, tb_log_name="PPO2", callback=None, print_attention_map=False, filedir=None):
         new_tb_log = self._init_num_timesteps(False)
         callback = self._init_callback(callback)
         runner = self.test_runner  # run on eval env
@@ -557,7 +557,7 @@ class PPO2Repr(ActorCriticRLModel):
 
             rollout = runner.run(callback)
             # Unpack
-            obs, returns, masks, actions, values, neglogpacs, states, ep_infos, true_reward, attention = rollout
+            obs, returns, masks, actions, values, neglogpacs, states, ep_infos, true_reward, attention, feature_map = rollout
             self.ep_info_buf_test.extend(ep_infos)
             t_now = time.time()
             fps = int(self.n_batch / (t_now - t_start))
@@ -578,28 +578,34 @@ class PPO2Repr(ActorCriticRLModel):
                 logger.dumpkvs()
 
             # save attention image
-            if mean_obs is not None:
-                obs = obs + mean_obs
             if print_attention_map:
+                if filedir is None:
+                    filedir = os.getenv('OPENAI_LOGDIR')
+                filedir = os.path.join(filedir, "attention_eval")
                 rnd_indices = np.random.choice(len(obs), 5)
                 for i in range(len(rnd_indices)):
                     ind = rnd_indices[i]
 
-                    self.save_attention(attention[ind], obs[ind], filedir, self.num_timesteps, i)
+                    self.save_attention(attention[ind], obs[ind], feature_map[i], filedir, self.num_timesteps, i)
 
         callback.on_training_end()
         return self
 
-    def save_attention(self, attention, obs, filedir, step, num):
-        subdir = os.path.join(filedir, "./attention")
+    def restore_map(self, flatten_map, obs_shape):
+        length = int(np.sqrt(np.size(flatten_map)))
+        flatten_map = flatten_map.reshape(length, length)
+        flatten_map = (flatten_map - np.min(flatten_map)) / (np.max(flatten_map) - np.min(flatten_map))
+        flatten_map = cv2.resize(flatten_map, (obs_shape[0], obs_shape[1]))
+
+        flatten_map = np.repeat(flatten_map[..., np.newaxis], 3, axis=2)
+        return flatten_map
+
+    def save_attention(self, attention, obs, feature_map, subdir, step, num):
+        # subdir = os.path.join(filedir, "./attention")
         # print(attention.squeeze())
 
-        length = int(np.sqrt(np.size(attention)))
-        attention = attention.reshape(length, length)
-        attention = (attention - np.min(attention)) / (np.max(attention) - np.min(attention))
-        attention = cv2.resize(attention, (obs.shape[0], obs.shape[1]))
-
-        attention = np.repeat(attention[..., np.newaxis], 3, axis=2)
+        attention = self.restore_map(attention, obs.shape)
+        feature_map = self.restore_map(feature_map, obs.shape)
         image = np.array(obs)[..., :3]
         # print(image.shape)
         attentioned_image = image * attention
@@ -607,6 +613,7 @@ class PPO2Repr(ActorCriticRLModel):
             os.makedirs(os.path.join(subdir, "./mask/"))
             os.makedirs(os.path.join(subdir, "./masked_image/"))
             os.makedirs(os.path.join(subdir, "./image/"))
+            os.makedirs(os.path.join(subdir, "./feature_map/"))
         # print(attention.shape)
         cv2.imwrite(os.path.join(subdir, "./masked_image/", "masked_image_{}_{}.png".format(step, num)),
                     attentioned_image.transpose((1, 0, 2)))
@@ -614,12 +621,17 @@ class PPO2Repr(ActorCriticRLModel):
         cv2.imwrite(os.path.join(subdir, "./mask/", "attention_{}_{}.png".format(step, num)),
                     # attention * 255)
                     attention.transpose((1, 0, 2)) * 255)
+
+        cv2.imwrite(os.path.join(subdir, "./feature_map/", "feature_map_{}_{}.png".format(step, num)),
+                    # attention * 255)
+                    feature_map.transpose((1, 0, 2)) * 255)
+
         cv2.imwrite(os.path.join(subdir, "./image/", "obs_{}_{}.png".format(step, num)),
                     # image * 255)
                     image.transpose((1, 0, 2)))
 
     def learn(self, total_timesteps, finetune=False, callback=None, log_interval=1, tb_log_name="PPO2",
-              reset_num_timesteps=True, begin_eval=False):
+              reset_num_timesteps=True, begin_eval=False, print_attention_map=False, filedir=None):
         # Transform to callable if needed
         self.learning_rate = get_schedule_fn(self.learning_rate)
         self.cliprange = get_schedule_fn(self.cliprange)
@@ -657,8 +669,8 @@ class PPO2Repr(ActorCriticRLModel):
                 # true_reward is the reward without discount
                 rollout = runner.run(callback)
                 # Unpack
-                obs, returns, masks, actions, values, neglogpacs, states, ep_infos, true_reward, _ = rollout
-                # true_returns = get_true_return(true_reward, masks, self.n_envs)
+                obs, returns, masks, actions, values, neglogpacs, states, ep_infos, true_reward, attention = rollout
+                true_returns = get_true_return(true_reward, masks, self.n_envs)
                 # if self.value_dict is not None:
                 #     true_returns = np.array(
                 #         [self.value_dict.get(obs[i + 1].data.tobytes(), np.nan) for i in range(len(obs) - 1)] + [
@@ -666,7 +678,7 @@ class PPO2Repr(ActorCriticRLModel):
 
                 # find_value_rate = (np.sum(np.isnan(true_returns)) + 0.0) / len(true_returns)
                 # Save
-                # self.replay_buffer.add_batch(obs, actions, true_reward, true_returns, masks)
+                self.replay_buffer.add_batch(obs, actions, true_reward, true_returns, masks)
 
                 print("not nan percentage:", self.replay_buffer.percentage(), self.replay_buffer.curr_capacity)
                 callback.on_rollout_end()
@@ -693,8 +705,7 @@ class PPO2Repr(ActorCriticRLModel):
                                 obs_value_batch, _, _, _, _, _, return_t_batch = self.replay_buffer.sample(
                                     len(mbinds))
                                 predict_returns = self.sess.run(self.attention_model.mem_value_fn,
-                                                                {self.attention_model.obs_ph: obs_value_batch,
-                                                                 self.action_ph: act_t_batch})
+                                                                {self.attention_model.obs_ph: obs_value_batch})
                                 predict_returns = predict_returns.reshape(-1)
 
                                 return_t_batch = np.array(return_t_batch)
@@ -737,8 +748,7 @@ class PPO2Repr(ActorCriticRLModel):
                                 obs_value_batch, _, _, _, _, _, return_t_batch = self.replay_buffer.sample(
                                     len(mbinds))
                                 predict_returns = self.sess.run(self.attention_model.mem_value_fn,
-                                                                {self.attention_model.obs_ph: obs_value_batch,
-                                                                 self.action_ph: act_t_batch})
+                                                                {self.attention_model.obs_ph: obs_value_batch})
                                 predict_returns = predict_returns.reshape(-1)
                                 return_t_batch[np.isinf(return_t_batch)] = predict_returns[np.isinf(return_t_batch)]
 
@@ -762,6 +772,9 @@ class PPO2Repr(ActorCriticRLModel):
                 t_now = time.time()
                 fps = int(self.n_batch / (t_now - t_start))
                 suffix = "_finetune" if finetune else ""
+
+                # print("test tensorboard",self.tensorboard_log,writer)
+
                 if writer is not None:
                     total_episode_reward_logger(self.episode_reward,
                                                 true_reward.reshape((self.n_envs, self.n_steps)),
@@ -785,6 +798,15 @@ class PPO2Repr(ActorCriticRLModel):
                     for (loss_val, loss_name) in zip(loss_vals, loss_names):
                         logger.logkv(loss_name, loss_val)
                     logger.dumpkvs()
+
+                if print_attention_map:
+                    rnd_indices = np.random.choice(len(obs), 5)
+                    if filedir is None:
+                        filedir = os.getenv('OPENAI_LOGDIR')
+                    filedir = os.path.join(filedir, "attention_train")
+                    for i in range(len(rnd_indices)):
+                        ind = rnd_indices[i]
+                        self.save_attention(attention[ind], obs[ind], filedir, self.num_timesteps, i)
 
             callback.on_training_end()
             return self
@@ -820,13 +842,15 @@ class PPO2Repr(ActorCriticRLModel):
         self._save_to_file(save_path, data=data, params=params_to_save, cloudpickle=cloudpickle)
 
     def act(self, obs, is_train=False):
-        action, value, self.initial_state, neglogp, attention_saved = self.step(obs, None, None, deterministic=is_train)
+        action, value, self.initial_state, neglogp, attention_saved, feature_map = self.step(obs, None, None,
+                                                                                             deterministic=is_train)
         self.num_timesteps += 1
         # print(neglogp)
         # print(action)
         print("action probability", self.act_model.proba_step(obs))
         print("random action", action)
-        self.save_attention(attention_saved, obs[0], os.getenv('OPENAI_LOGDIR'), self.num_timesteps, 0)
+        self.save_attention(attention_saved, obs[0], feature_map, os.getenv('OPENAI_LOGDIR'), self.num_timesteps, 0)
+        return action
 
     # to be compatible
     def observe(self, action, reward, obs, done, train=True):
@@ -868,16 +892,19 @@ class Runner(AbstractEnvRunner):
         """
         # mb stands for minibatch
         mb_obs, mb_rewards, mb_actions, mb_values, mb_dones, mb_neglogpacs, mb_attention = [], [], [], [], [], [], []
+        mb_featuremap = []
         mb_states = self.states
         ep_infos = []
         for _ in range(self.n_steps):
-            actions, values, self.states, neglogpacs, attention = self.model.step(self.obs, self.states, self.dones)
+            actions, values, self.states, neglogpacs, attention, feature_map = self.model.step(self.obs, self.states,
+                                                                                               self.dones)
             mb_obs.append(self.obs.copy())
             mb_actions.append(actions)
             mb_values.append(values)
             mb_neglogpacs.append(neglogpacs)
             mb_dones.append(self.dones)
             mb_attention.append(attention)
+            mb_featuremap.append(feature_map)
             clipped_actions = actions
             # Clip the actions to avoid out of bound error
             if isinstance(self.env.action_space, gym.spaces.Box):
@@ -907,6 +934,7 @@ class Runner(AbstractEnvRunner):
         mb_neglogpacs = np.asarray(mb_neglogpacs, dtype=np.float32)
         mb_dones = np.asarray(mb_dones, dtype=np.bool)
         mb_attention = np.asarray(mb_attention, dtype=np.float32)
+        mb_featuremap = np.asarray(mb_featuremap, dtype=np.float32)
         last_values = self.model.value(self.obs, self.states, self.dones)
         # discount/bootstrap off value fn
         mb_advs = np.zeros_like(mb_rewards)
@@ -923,11 +951,12 @@ class Runner(AbstractEnvRunner):
             mb_advs[step] = last_gae_lam = delta + self.gamma * self.lam * nextnonterminal * last_gae_lam
         mb_returns = mb_advs + mb_values
         # print(mb_rewards)
-        mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, true_reward, mb_attention = \
+        mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, true_reward, mb_attention, mb_featuremap = \
             map(swap_and_flatten,
-                (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, true_reward, mb_attention))
+                (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, true_reward, mb_attention,
+                 mb_featuremap))
 
-        return mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, mb_states, ep_infos, true_reward, mb_attention
+        return mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, mb_states, ep_infos, true_reward, mb_attention, mb_featuremap
 
 
 # obs, returns, masks, actions, values, neglogpacs, states = runner.run()
