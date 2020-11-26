@@ -57,11 +57,11 @@ class PPO2Repr(ActorCriticRLModel):
 
     def __init__(self, policy, env, test_env=None, gamma=0.99, n_steps=128, ent_coef=0.01, learning_rate=2.5e-4,
                  vf_coef=0.5,
-                 repr_coef=0., contra_coef=1., atten_encoder_coef=5 * 1. / 256, atten_decoder_coef=1.,
+                 repr_coef=1., contra_coef=1., atten_encoder_coef=5 * 1. / 256, atten_decoder_coef=1.,
                  regularize_coef=1e-4,
                  max_grad_norm=0.5, lam=0.95, nminibatches=4, noptepochs=4, cliprange=0.2, cliprange_vf=None,
                  verbose=0, tensorboard_log=None, _init_setup_model=True, policy_kwargs=None,
-                 full_tensorboard_log=False, seed=None, n_cpu_tf_sess=None, c_loss_type="origin", replay_buffer=None):
+                 full_tensorboard_log=False, seed=None, n_cpu_tf_sess=None, c_loss_type="origin", use_attention=True,replay_buffer=None):
 
         self.learning_rate = learning_rate
         self.cliprange = cliprange
@@ -81,6 +81,7 @@ class PPO2Repr(ActorCriticRLModel):
         self.noptepochs = noptepochs
         self.tensorboard_log = tensorboard_log
         self.full_tensorboard_log = full_tensorboard_log
+        self.use_attetion = use_attention
         self.action_ph = None
         self.advs_ph = None
         self.rewards_ph = None
@@ -126,6 +127,7 @@ class PPO2Repr(ActorCriticRLModel):
         super().__init__(policy=policy, env=env, verbose=verbose, requires_vec_env=True,
                          _init_setup_model=_init_setup_model, policy_kwargs=policy_kwargs,
                          seed=seed, n_cpu_tf_sess=n_cpu_tf_sess)
+        self.policy_kwargs["add_attention"] = self.use_attetion
         self.test_env = test_env
         if _init_setup_model:
             self.setup_model()
@@ -669,7 +671,7 @@ class PPO2Repr(ActorCriticRLModel):
                 # true_reward is the reward without discount
                 rollout = runner.run(callback)
                 # Unpack
-                obs, returns, masks, actions, values, neglogpacs, states, ep_infos, true_reward, attention = rollout
+                obs, returns, masks, actions, values, neglogpacs, states, ep_infos, true_reward, attention, feature_map = rollout
                 true_returns = get_true_return(true_reward, masks, self.n_envs)
                 # if self.value_dict is not None:
                 #     true_returns = np.array(
@@ -678,7 +680,7 @@ class PPO2Repr(ActorCriticRLModel):
 
                 # find_value_rate = (np.sum(np.isnan(true_returns)) + 0.0) / len(true_returns)
                 # Save
-                self.replay_buffer.add_batch(obs, actions, true_reward, true_returns, masks)
+                # self.replay_buffer.add_batch(obs, actions, true_reward, true_returns, masks)
 
                 print("not nan percentage:", self.replay_buffer.percentage(), self.replay_buffer.curr_capacity)
                 callback.on_rollout_end()
@@ -806,7 +808,7 @@ class PPO2Repr(ActorCriticRLModel):
                     filedir = os.path.join(filedir, "attention_train")
                     for i in range(len(rnd_indices)):
                         ind = rnd_indices[i]
-                        self.save_attention(attention[ind], obs[ind], filedir, self.num_timesteps, i)
+                        self.save_attention(attention[ind], obs[ind], feature_map[i], filedir, self.num_timesteps, i)
 
             callback.on_training_end()
             return self

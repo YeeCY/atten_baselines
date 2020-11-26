@@ -42,9 +42,9 @@ def attention_mask(feature_map, hard_mask=False):
         attention_max = tf.reduce_max(tf.reduce_max(attention, axis=1, keep_dims=True), axis=2, keep_dims=True)
         attention_min = tf.reduce_min(tf.reduce_min(attention, axis=1, keep_dims=True), axis=1, keep_dims=True)
         attention_normalized = (attention - attention_min) / (attention_max - attention_min + 1e-9)
-        feature_map_out = tf.multiply(attention_normalized, attention_feature_map)
+        feature_map_out = tf.multiply(attention_normalized, feature_map)
     else:
-        feature_map_out = tf.multiply(attention, attention_feature_map)
+        feature_map_out = tf.multiply(attention, feature_map)
 
     return conv_to_fc(attention), conv_to_fc(feature_map_out)
 

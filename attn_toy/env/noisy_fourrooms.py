@@ -281,19 +281,19 @@ class FourroomsOptimalNoise(Fourrooms):  # noise type = optimal action
 class FourroomsMyNoise(FourroomsOptimalNoise):  # noise type = optimal action
     def __init__(self, max_epilen=100, obs_size=128, seed=0, optimal_action=None):
         super(FourroomsMyNoise, self).__init__(max_epilen, obs_size, seed, optimal_action)
-        self.noise_size = 100
-        self.noisy_background = np.random.randint(0, 100, (self.noise_size, self.obs_height, self.obs_width, 3))
-        self.background = self.render_with_blocks(np.zeros((self.obs_height, self.obs_width, 3), dtype=np.uint8),
-                                                  self.blocks)
+        # self.noise_size = 100
+        # self.noisy_background = np.random.randint(0, 100, (self.noise_size, 104, 104, 3))
+        # self.origin_background = self.render_with_blocks(np.zeros((104, 104, 3), dtype=np.uint8),
+        #                                           self.blocks)
 
-    def render(self, state=-1):
-        rnd = np.random.randint(0, self.noise_size)
-        self.background = self.render_with_blocks(self.noisy_background[rnd], self.blocks)
-        return super(self, FourroomsMyNoise).render(state)
     # def render(self, state=-1):
-    #     obs = super(FourroomsMyNoise, self).render(state)
-    #     # print(obs.shape)
-    #     obs = obs[..., [2, 0, 1]]# rgb -> brg
-    #     return obs.astype(np.uint8)
+    #     rnd = np.random.randint(0, self.noise_size)
+    #     self.origin_background = self.render_with_blocks(self.noisy_background[rnd], self.blocks)
+    #     return super(FourroomsMyNoise,self).render(state)
+    def render(self, state=-1):
+        obs = super(FourroomsMyNoise, self).render(state)
+        # print(obs.shape)
+        obs = obs[..., [2, 0, 1]]# rgb -> brg
+        return obs.astype(np.uint8)
 
 # class FourroomsNorenderIndoorNoise(Fourrooms):

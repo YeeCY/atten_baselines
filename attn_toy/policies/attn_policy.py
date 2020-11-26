@@ -4,7 +4,7 @@ from stable_baselines.common.policies import *
 class AttentionPolicy(ActorCriticPolicy):
     def __init__(self, sess, ob_space, ac_space, n_env, n_steps, n_batch, reuse=False, layers=None, net_arch=None,
                  act_fun=tf.tanh, cnn_extractor=attention_cnn_exposed, feature_extraction="cnn", num_actions=4,
-                 add_attention=False,
+                 add_attention=True,
                  **kwargs):
         super(AttentionPolicy, self).__init__(sess, ob_space, ac_space, n_env, n_steps, n_batch, reuse=reuse,
                                               scale=(feature_extraction == "cnn"))
@@ -32,7 +32,7 @@ class AttentionPolicy(ActorCriticPolicy):
                 if add_attention:
                     used_feature_map = attentioned_feature_map
                 else:
-                    used_feature_map = reduced_feature_map
+                    used_feature_map = feature_map
                 self._mem_value_fn = linear(used_feature_map, 'mem_vf', num_actions, init_scale=np.sqrt(2))
                 self.contra_repr = linear(used_feature_map, 'contra_repr', 32, init_scale=np.sqrt(2))
             # with tf.variable_scope("feature_value", reuse=False):
@@ -69,14 +69,14 @@ class AttentionPolicy(ActorCriticPolicy):
 
     def step(self, obs, state=None, mask=None, deterministic=False):
         if deterministic:
-            action, value, neglogp, attention_saved = self.sess.run(
-                [self.deterministic_action, self.value_flat, self.neglogp, self.attention],
+            action, value, neglogp, attention_saved,feature_map = self.sess.run(
+                [self.deterministic_action, self.value_flat, self.neglogp, self.attention, self.reduced_feature_map],
                 {self.obs_ph: obs})
         else:
-            action, value, neglogp, attention_saved = self.sess.run(
-                [self.action, self.value_flat, self.neglogp, self.attention],
+            action, value, neglogp, attention_saved,feature_map = self.sess.run(
+                [self.action, self.value_flat, self.neglogp, self.attention, self.reduced_feature_map],
                 {self.obs_ph: obs})
-        return action, value, self.initial_state, neglogp, attention_saved
+        return action, value, self.initial_state, neglogp, attention_saved, feature_map
 
     def act(self, obs, deterministic=False):
 
