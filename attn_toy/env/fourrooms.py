@@ -35,8 +35,9 @@ class Fourrooms(object):
         self.viewer = Viewer(self.block_size * len(self.occupancy), self.block_size * len(self.occupancy[0]))
         self.blocks = self.make_blocks()
 
-    def init_basic(self, max_epilen):
 
+    def init_basic(self, max_epilen):
+        self.num_steps = 0
         self.block_size = 8
         self.occupancy = np.array(
             [np.array(list(map(lambda c: 1 if c == '1' else 0, line))) for line in self.layout.splitlines()])
@@ -66,7 +67,7 @@ class Fourrooms(object):
                     statenum += 1
         self.tocell = {v: k for k, v in self.tostate.items()}
 
-        self.goal = 62
+        self.goal = 77
 
         self.init_states = list(range(self.observation_space.n))
         self.init_states.remove(self.goal)
@@ -121,6 +122,7 @@ class Fourrooms(object):
         self.done = False
         self.current_steps = 0
         self.state = state
+        self.num_steps = 0
         return np.array(self.mapping[state])
 
     def step(self, action):
@@ -166,7 +168,7 @@ class Fourrooms(object):
             reward = 100
         else:
             reward = -1
-
+        self.num_steps +=1
         return np.array(self.mapping[state]), reward, self.done, info
 
     def get_dict(self):

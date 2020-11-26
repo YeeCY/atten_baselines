@@ -283,12 +283,14 @@ class PPO2Repr(ActorCriticRLModel):
                     attention_min = tf.reduce_min(attention_model.attention, axis=1, keepdims=True)
                     normalized_attention = (attention_model.attention - attention_min) / (
                             attention_max - attention_min + 1e-12)
+                    ball_attention = normalized_attention / tf.norm(normalized_attention, ord=2, axis=1)
                     self.encoder_loss = self.atten_encoder_coef * tf.reduce_mean(
                         tf.norm(normalized_attention, ord=1, axis=1))
                     # self.weight_loss = tf.norm(self.train_model.weighted_w,ord=1)
                     self.decoder_loss = self.atten_decoder_coef * tf.reduce_mean(
                         tf.square(attention_model.mem_value_fn - self.mem_return_ph))
 
+                    self.discripancy_loss = normalized_attention[:,0,:,:] -
                     self.repr_loss = self.contrastive_loss + self.encoder_loss + self.decoder_loss
                     loss = self.pg_loss - self.entropy * self.ent_coef + self.vf_loss * self.vf_coef + self.repr_coef * self.repr_loss
                     ppo_loss = self.pg_loss - self.entropy * self.ent_coef + self.vf_loss * self.vf_coef

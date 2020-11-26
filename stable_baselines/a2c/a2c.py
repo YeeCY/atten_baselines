@@ -11,6 +11,8 @@ from stable_baselines.common.runners import AbstractEnvRunner
 from stable_baselines.common.schedules import Scheduler
 from stable_baselines.common.tf_util import mse, total_episode_reward_logger
 from stable_baselines.common.math_util import safe_mean
+import os
+import cv2
 
 
 def discount_with_dones(rewards, dones, gamma):
@@ -119,7 +121,7 @@ class A2C(ActorCriticRLModel):
         with SetVerbosity(self.verbose):
 
             assert issubclass(self.policy, ActorCriticPolicy), "Error: the input policy for the A2C model must be an " \
-                                                                "instance of common.policies.ActorCriticPolicy."
+                                                               "instance of common.policies.ActorCriticPolicy."
 
             self.graph = tf.Graph()
             with self.graph.as_default():
@@ -294,9 +296,23 @@ class A2C(ActorCriticRLModel):
                         logger.logkv('ep_reward_mean', safe_mean([ep_info['r'] for ep_info in self.ep_info_buf]))
                         logger.logkv('ep_len_mean', safe_mean([ep_info['l'] for ep_info in self.ep_info_buf]))
                     logger.dump_tabular()
-
+                # print("saving image")
+                self.save_img(obs[np.random.randint(0, len(obs), 2)],numsteps=self.num_timesteps)
         callback.on_training_end()
         return self
+
+    def save_img(self, obs, file_path=None, numsteps=0):
+        if file_path is None:
+            file_path = os.getenv("OPENAI_LOGDIR")
+        if not os.path.isdir(os.path.join(file_path, "./image/")):
+            os.makedirs(os.path.join(file_path, "./image/"))
+        # print(file_path)
+        # print(np.max(obs))
+        for i in range(len(obs)):
+            image = np.array(obs[i, :, :, :1])
+            cv2.imwrite(os.path.join(file_path, "./image/", "obs_{}_{}.png".format(numsteps, i)),
+                        image)
+            # image)
 
     def save(self, save_path, cloudpickle=False):
         data = {

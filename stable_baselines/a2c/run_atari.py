@@ -5,7 +5,7 @@ from stable_baselines.common.cmd_util import make_atari, Monitor, wrap_deepmind,
     SubprocVecEnv, atari_arg_parser
 from stable_baselines.common.vec_env import VecFrameStack
 from stable_baselines.common.policies import CnnPolicy, CnnLstmPolicy, CnnLnLstmPolicy
-from stable_baselines.a2c.rlgan_warpper import AtariRescale42x42
+from stable_baselines.a2c.rlgan_warpper import AtariRescale42x42,AtariNoisyBackground
 
 
 def make_atari_env(env_id, num_env, seed, wrapper_kwargs=None,
@@ -35,7 +35,8 @@ def make_atari_env(env_id, num_env, seed, wrapper_kwargs=None,
             env.seed(seed + rank)
             env = Monitor(env, logger.get_dir() and os.path.join(logger.get_dir(), str(rank)),
                           allow_early_resets=allow_early_resets)
-            env = AtariRescale42x42(env, variation)
+            env = AtariNoisyBackground(env)
+            # env = AtariRescale42x42(env, variation)
             return wrap_deepmind(env, **wrapper_kwargs)
 
         return _thunk

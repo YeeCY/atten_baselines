@@ -74,6 +74,28 @@ def _process_frame42(frame, variation):
     return frame
 
 
+def _process_frame42_background(frame):
+    # print(frame.shape)
+    frame = frame[34:34 + 160, :160, :]
+    # Resize by half, then down to 42x42 (essentially mipmapping). If
+    # we resize directly we lose pixels that, when mapped to 42x42,
+    # aren't close enough to the pixel boundary.
+    frame = cv2.resize(frame, (80, 80))
+
+    # if args.collect_images and img_counter <= args.num_collected_imgs:
+    #     np.save('unit/datasets/breakout-' + args.variation + '/trainB/img_' + str(img_counter), frame)
+    # print(frame)
+    # for i in range(80):
+    #     for j in range(80):
+    #         if (frame[i, j, :] == 0).all():# consider black as background
+    #             frame[i, j, :] = np.random.randint(0, 100, (3,))
+    frame[frame == 0] = np.random.randint(0, 50, np.sum(frame == 0))
+    # frame = frame.astype(np.float32)
+    # frame *= (1.0 / 255.0)
+    # frame = np.moveaxis(frame, -1, 0)
+    return frame
+
+
 class AtariRescale42x42(gym.ObservationWrapper):
     def __init__(self, env=None, variation=None):
         super(AtariRescale42x42, self).__init__(env)
@@ -82,3 +104,12 @@ class AtariRescale42x42(gym.ObservationWrapper):
 
     def observation(self, observation):
         return _process_frame42(observation, self.variation)
+
+
+class AtariNoisyBackground(gym.ObservationWrapper):
+    def __init__(self, env=None):
+        super(AtariNoisyBackground, self).__init__(env)
+        self.observation_space = Box(0.0, 1.0, [3, 80, 80], dtype=np.float32)
+
+    def observation(self, observation):
+        return _process_frame42_background(observation)
