@@ -77,11 +77,12 @@ def make_gridworld(noise_type=1, seed=0):
     return env_fn
 #@auther:lzy
 def make_gridworld_withcoin(noise_type=1, seed=0):
+    
     envs = {1: FourroomsCoinNorender,2:FourroomsCoinDynamicNoiseNorender}
     env = envs.get(noise_type, FourroomsCoinNorender)
 
     def env_fn():
-        return ImageInputWarpper(env())
+        return ImageInputWarpper(env(seed=seed))
 
     return env_fn
 
@@ -94,6 +95,7 @@ def main():
                         default='attention')
     parser.add_argument('--n_env', help='Policy architecture', type=int, default=8)
     parser.add_argument('--finetune_num_timesteps', help='Policy architecture', type=int, default=131072)
+    parser.add_argument('--id', help='experiment id', type=str, default='coin0')
     args = parser.parse_args()
     logger.configure()
 
@@ -103,7 +105,7 @@ def main():
     #test_env = SubprocVecEnv([make_gridworld(noise_type=4, seed=args.seed) for _ in range(args.n_env)])
     # print(test_env)
     ##begin
-    replay_buffer = value_iteration(make_gridworld_withcoin(noise_type=1, seed=args.seed)(), gamma=1, filedir="/home/lzy/attn_2/")
+    replay_buffer = value_iteration(make_gridworld_withcoin(noise_type=1, seed=args.seed)(), gamma=1, filedir="/home/lzy/experiments/attn_"+args.id)
     env = SubprocVecEnv([make_gridworld_withcoin(noise_type=1, seed=args.seed) for _ in range(args.n_env)])
     test_env = SubprocVecEnv([make_gridworld_withcoin(noise_type=2, seed=args.seed) for _ in range(args.n_env)])
     #end
