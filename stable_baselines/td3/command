@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICE=1 OPENAI_LOGDIR=/data1/hh/td3cec/ant_td3_baselines/ nohup python run_td3.py --agent=td3 --env-id=Ant-v2

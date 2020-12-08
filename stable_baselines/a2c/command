@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=1 OPENAI_LOGDIR=/data1/hh/attn_atari/attention_breakout nohup python run_atari_generalize.py --num-timesteps=10000000 > breakout_attention.out&
