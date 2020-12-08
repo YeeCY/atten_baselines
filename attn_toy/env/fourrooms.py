@@ -15,7 +15,7 @@ class Fourrooms(object):
     # cell : (i,j)
     # observation : resultList[state]
     # small : 104 large 461
-    def __init__(self, max_epilen=100):
+    def __init__(self, max_epilen=100, goal=77):
         self.layout = """\
 1111111111111
 1     1     1
@@ -31,12 +31,11 @@ class Fourrooms(object):
 1     1     1
 1111111111111
 """
-        self.init_basic(max_epilen)
+        self.init_basic(max_epilen, goal)
         self.viewer = Viewer(self.block_size * len(self.occupancy), self.block_size * len(self.occupancy[0]))
         self.blocks = self.make_blocks()
 
-
-    def init_basic(self, max_epilen):
+    def init_basic(self, max_epilen, goal):
         self.num_steps = 0
         self.block_size = 8
         self.occupancy = np.array(
@@ -67,7 +66,7 @@ class Fourrooms(object):
                     statenum += 1
         self.tocell = {v: k for k, v in self.tostate.items()}
 
-        self.goal = 77
+        self.goal = goal
 
         self.init_states = list(range(self.observation_space.n))
         self.init_states.remove(self.goal)
@@ -168,7 +167,7 @@ class Fourrooms(object):
             reward = 100
         else:
             reward = -1
-        self.num_steps +=1
+        self.num_steps += 1
         return np.array(self.mapping[state]), reward, self.done, info
 
     def get_dict(self):
@@ -223,7 +222,7 @@ class Fourrooms(object):
 
 
 class FourroomsNorender(Fourrooms):
-    def __init__(self, max_epilen=100):
+    def __init__(self, max_epilen=100, goal=77):
         self.layout = """\
 1111111111111
 1     1     1
@@ -239,11 +238,12 @@ class FourroomsNorender(Fourrooms):
 1     1     1
 1111111111111
 """
-        self.init_basic(max_epilen)
+        self.init_basic(max_epilen, goal)
         self.blocks = self.make_blocks()
         self.origin_background = self.render_with_blocks(
             255 * np.ones((self.obs_height, self.obs_width, 3), dtype=np.uint8),
             self.blocks)
+        self.agent_color = np.random.rand(100, 3)
         # print(self.background.shape)
 
     def render(self, mode=0):
@@ -252,7 +252,8 @@ class FourroomsNorender(Fourrooms):
             x, y = self.currentcell
             # state = self.tostate[self.currentcell]
             # self.add_block(x, y, tuple(self.rand_color[state]/255))
-            blocks.append(self.make_block(x, y, (0, 0, 1)))
+            blocks.append(self.make_block(x, y, self.agent_color[np.random.randint(100)]))
+            # blocks.append(self.make_block(x, y, (0, 0, 1)))
 
         x, y = self.tocell[self.goal]
         blocks.append(self.make_block(x, y, (1, 0, 0)))

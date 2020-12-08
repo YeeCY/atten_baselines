@@ -32,7 +32,8 @@ def nature_cnn(scaled_images, **kwargs):
 
 def attention_mask(feature_map, hard_mask=False):
     attention_feature_map = tf.reduce_mean(feature_map, axis=-1, keepdims=True)
-    attention = tf.nn.sigmoid(
+    with tf.variable_scope("attention"):
+        attention = tf.nn.sigmoid(
         conv(attention_feature_map, 'atten', n_filters=1, filter_size=1, stride=1, init_scale=np.sqrt(2)))
     # attention = layers.convolution2d(attention_feature_map, num_outputs=1, kernel_size=1, stride=1,
     #                                  activation_fn=tf.nn.sigmoid,
@@ -40,13 +41,34 @@ def attention_mask(feature_map, hard_mask=False):
     #                                  biases_initializer=tf.contrib.layers.xavier_initializer())
     if hard_mask:
         attention_max = tf.reduce_max(tf.reduce_max(attention, axis=1, keep_dims=True), axis=2, keep_dims=True)
-        attention_min = tf.reduce_min(tf.reduce_min(attention, axis=1, keep_dims=True), axis=1, keep_dims=True)
-        attention_normalized = (attention - attention_min) / (attention_max - attention_min + 1e-9)
+        attention_min = tf.reduce_min(tf.reduce_min(attention, axis=1, keep_dims=True), axis=2, keep_dims=True)
+        attention_normalized = (attention - attention_min) / (attention_max - attention_min + 1e-12)
         feature_map_out = tf.multiply(attention_normalized, feature_map)
     else:
         feature_map_out = tf.multiply(attention, feature_map)
 
-    return conv_to_fc(attention), conv_to_fc(feature_map_out)
+    return attention, feature_map_out
+
+
+def deconv_decoder(feature_map, input_size=16, img_size=128, num_kernel=16, output_channels=4, reuse=False):
+    with tf.variable_scope("decoder", reuse=reuse):
+        padded_map = feature_map
+        # padded_map = tf.pad(feature_map, tf.constant([[0, 0], [1, 1], [1, 1], [0, 0]]), "REFLECT")
+        feature_map = layers.convolution2d_transpose(padded_map, num_outputs=num_kernel, kernel_size=2, stride=2,
+                                                     activation_fn=tf.nn.relu,
+                                                     padding='valid')
+        input_size = input_size * 2 + 1
+        feature_map = tf.pad(feature_map, tf.constant([[0, 0], [0, 1], [0, 1], [0, 0]]), "REFLECT")
+        while input_size < img_size:
+            feature_map = layers.convolution2d_transpose(feature_map, num_outputs=num_kernel, kernel_size=2, stride=2,
+                                                         activation_fn=tf.nn.relu,
+                                                         padding='valid')
+            input_size *= 2
+
+        feature_map = layers.convolution2d_transpose(feature_map, num_outputs=output_channels, kernel_size=1, stride=1,
+                                                     activation_fn=tf.nn.sigmoid,
+                                                     padding='valid')
+    return feature_map
 
 
 def nature_cnn_exposed(scaled_images, **kwargs):
@@ -87,7 +109,7 @@ def attention_cnn_exposed(scaled_images, **kwargs):
                                    padding='valid', weights_initializer=tf.contrib.layers.xavier_initializer(),
                                    biases_initializer=tf.contrib.layers.xavier_initializer())
         out = tf.pad(out, tf.constant([[0, 0], [1, 1], [1, 1], [0, 0]]), "REFLECT")
-        out = layers.convolution2d(out, num_outputs=64, kernel_size=3, stride=1, activation_fn=tf.nn.relu,
+        out = layers.convolution2d(out, num_outputs=16, kernel_size=3, stride=1, activation_fn=tf.nn.relu,
                                    padding='valid', weights_initializer=tf.contrib.layers.xavier_initializer(),
                                    biases_initializer=tf.contrib.layers.xavier_initializer())
 

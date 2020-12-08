@@ -1,13 +1,14 @@
 from stable_baselines.common.policies import *
+from attn_toy.policies.attn_policy import AttentionPolicy
 
 
-class AttentionPolicy(ActorCriticPolicy):
+class AttentionPolicyDecoder(AttentionPolicy):
     def __init__(self, sess, ob_space, ac_space, n_env, n_steps, n_batch, reuse=False, layers=None, net_arch=None,
                  act_fun=tf.tanh, cnn_extractor=attention_cnn_exposed, feature_extraction="cnn", num_actions=4,
                  add_attention=True,
                  **kwargs):
-        super(AttentionPolicy, self).__init__(sess, ob_space, ac_space, n_env, n_steps, n_batch, reuse=reuse,
-                                              scale=(feature_extraction == "cnn"))
+        ActorCriticPolicy.__init__(self, sess, ob_space, ac_space, n_env, n_steps, n_batch, reuse=reuse,
+                                   scale=(feature_extraction == "cnn"))
 
         self._kwargs_check(feature_extraction, kwargs)
 
@@ -27,35 +28,31 @@ class AttentionPolicy(ActorCriticPolicy):
             assert feature_extraction == "cnn", "Attention policy only support cnn extrator now"
             with tf.variable_scope("feature", reuse=False):
                 feature_map = cnn_extractor(self.processed_obs, **kwargs)
-                attention_raw, attentioned_feature_map_raw = attention_mask(feature_map)
-                attention, attentioned_feature_map = conv_to_fc(attention_raw), conv_to_fc(attentioned_feature_map_raw)
+                attention, attentioned_feature_map = attention_mask(feature_map)
                 reduced_feature_map = conv_to_fc(tf.reduce_mean(feature_map, axis=-1, keepdims=False))
                 if add_attention:
                     used_feature_map = attentioned_feature_map
                 else:
                     used_feature_map = feature_map
+                self.feature_map_ph = tf.placeholder(tf.float32, used_feature_map.shape, name="feature_map_ph")
                 self._mem_value_fn = linear(used_feature_map, 'mem_vf', num_actions, init_scale=np.sqrt(2))
                 self.contra_repr = linear(used_feature_map, 'contra_repr', 32, init_scale=np.sqrt(2))
-            # with tf.variable_scope("feature_value", reuse=False):
-            #     feature_map_value = cnn_extractor(self.processed_obs, **kwargs)
-            #     _, attentioned_feature_map_value = attention_mask(feature_map_value)
+                # with tf.variable_scope("feature_value", reuse=False):
+                #     feature_map_value = cnn_extractor(self.processed_obs, **kwargs)
+                #     _, attentioned_feature_map_value = attention_mask(feature_map_value)
+                img_size = ob_space.shape[1]
+                print(img_size)
+                self.decoded_image = deconv_decoder(used_feature_map, input_size=img_size // 8, img_size=img_size)
+                self.decoded_image_from_feature_map = deconv_decoder(self.feature_map_ph, input_size=img_size // 8,
+                                                                     img_size=img_size, reuse=True)
             with tf.variable_scope("last_layer", reuse=False):
                 pi_latent = tf.nn.relu(
                     linear(used_feature_map, 'pi_latent', n_hidden=512, init_scale=np.sqrt(2)))
                 # vf_latent = tf.nn.relu(linear(attentioned_feature_map_value, 'vi_latent', n_hidden=512, init_scale=np.sqrt(2)))
                 vf_latent = pi_latent
-
-                self.feature_map = feature_map
-                # print("hey",attention_raw.shape)
-                attention_max = tf.reduce_max(tf.reduce_max(attention_raw, axis=1, keep_dims=True), axis=2, keep_dims=True)
-                attention_min = tf.reduce_min(tf.reduce_min(attention_raw, axis=1, keep_dims=True), axis=2, keep_dims=True)
-                self.hard_attention = (attention_raw - attention_min) / (
-                        attention_max - attention_min + 1e-12)
-                self.hard_attention_feature_map = conv_to_fc(tf.multiply(self.hard_attention, feature_map))
-                self.residue_feature_map = conv_to_fc(tf.multiply(1. - self.hard_attention, feature_map))
+                self.unattended_feature_map = feature_map
                 self.reduced_feature_map = reduced_feature_map
-                self.soft_attention_feature_map = attentioned_feature_map
-                self.hard_attention = conv_to_fc(self.hard_attention)
+                self.feature_map = attentioned_feature_map
                 self.attention = attention
                 self.pi_latent = pi_latent
                 self.vf_latent = vf_latent
@@ -72,35 +69,3 @@ class AttentionPolicy(ActorCriticPolicy):
 
         self._setup_init()
         self.attention_saved = None
-
-    @property
-    def mem_value_fn(self):
-        return self._mem_value_fn
-
-    def step(self, obs, state=None, mask=None, deterministic=False):
-        if deterministic:
-            action, value, neglogp, attention_saved, feature_map = self.sess.run(
-                [self.deterministic_action, self.value_flat, self.neglogp, self.attention, self.reduced_feature_map],
-                {self.obs_ph: obs})
-        else:
-            action, value, neglogp, attention_saved, feature_map = self.sess.run(
-                [self.action, self.value_flat, self.neglogp, self.attention, self.reduced_feature_map],
-                {self.obs_ph: obs})
-        return action, value, self.initial_state, neglogp, attention_saved, feature_map
-
-    def act(self, obs, deterministic=False):
-
-        action, random_action, value, neglogp, attention_saved = self.sess.run(
-            [self.deterministic_action, self.action, self.value_flat, self.neglogp, self.attention],
-            {self.obs_ph: obs})
-
-        if deterministic:
-            return action
-        else:
-            return random_action
-
-    def proba_step(self, obs, state=None, mask=None):
-        return self.sess.run([self.policy_proba, self.policy], {self.obs_ph: obs})
-
-    def value(self, obs, state=None, mask=None):
-        return self.sess.run(self.value_flat, {self.obs_ph: obs})

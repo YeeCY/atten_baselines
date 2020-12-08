@@ -118,7 +118,9 @@ class TD3Mem(OffPolicyRLModel):
         # self.state_repr_func = state_repr_func
         # self.action_repr_func = action_repr_func
         self.qf1_pi = None
+        self.qf2_pi = None
         self.qf1_target = None
+        self.qf2_target = None
 
         self.state_repr_t = None
         self.action_repr_t = None
@@ -172,9 +174,12 @@ class TD3Mem(OffPolicyRLModel):
                     # Use two Q-functions to improve performance by reducing overestimation bias
                     qf1, qf2 = self.policy_tf.make_critics(self.processed_obs_ph, self.actions_ph)
                     # Q value when following the current policy
-                    qf1_pi, _ = self.policy_tf.make_critics(self.processed_obs_ph,
-                                                            policy_out, reuse=True)
+                    qf1_pi, qf2_pi = self.policy_tf.make_critics(self.processed_obs_ph,
+                                                                 policy_out, reuse=True)
+                    # self.qf1 = qf1
+                    # self.qf2 = qf2
                     self.qf1_pi = qf1_pi
+                    self.qf2_pi = qf2_pi
 
                 with tf.variable_scope("target", reuse=False):
                     # Create target networks
@@ -188,6 +193,7 @@ class TD3Mem(OffPolicyRLModel):
                     qf1_target, qf2_target = self.target_policy_tf.make_critics(self.processed_next_obs_ph,
                                                                                 noisy_target_action)
                     self.qf1_target = qf1_target
+                    self.qf2_target = qf2_target
 
                 with tf.variable_scope("loss", reuse=False):
                     # Take the min of the two target Q-Values (clipped Double-Q Learning)
@@ -379,7 +385,9 @@ class TD3Mem(OffPolicyRLModel):
                         self.sequence.append(
                             (new_obs_, action, self.state_repr_t, self.action_repr_t, 0, 0, done))
                     else:
-                        q = self.sess.run(self.qf1_target, feed_dict={self.observations_ph: [new_obs_]})
+                        q1 = self.sess.run(self.qf1_target, feed_dict={self.observations_ph: [new_obs_]})
+                        q2 = self.sess.run(self.qf2_target, feed_dict={self.observations_ph: [new_obs_]})
+                        q = np.minimum(q1, q2)
                         self.sequence.append(
                             (new_obs_, action, self.state_repr_t, self.action_repr_t, 0, np.squeeze(q), done))
                     # self.episodic_memory.update_sequence_iterate(self.sequence, self.k)

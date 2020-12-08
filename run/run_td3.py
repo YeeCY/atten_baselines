@@ -5,6 +5,7 @@ import os
 import gym
 import tensorflow as tf
 import numpy as np
+import json
 from mpi4py import MPI
 
 from stable_baselines import logger, bench
@@ -15,7 +16,7 @@ from stable_baselines.td3.td3_mem import TD3Mem
 from stable_baselines.ddpg.noise import AdaptiveParamNoiseSpec, OrnsteinUhlenbeckActionNoise, NormalActionNoise
 
 
-def run(env_id, seed, noise_type, layer_norm, evaluation, model_type, **kwargs):
+def run(env_id, seed, noise_type, layer_norm, evaluation, agent, **kwargs):
     """
     run the training of DDPG
 
@@ -81,7 +82,7 @@ def run(env_id, seed, noise_type, layer_norm, evaluation, model_type, **kwargs):
     del kwargs['num_timesteps']
 
     models = {"TD3": TD3, "TD3Mem": TD3Mem}
-    model_func = models.get(model_type, TD3)
+    model_func = models.get(agent, TD3)
     model = model_func(policy=policy, env=env,
                        action_noise=action_noise, buffer_size=int(1e5), verbose=2)
     model.learn(total_timesteps=num_timesteps)
@@ -101,7 +102,7 @@ def parse_args():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     parser.add_argument('--env-id', type=str, default='Ant-v2')
-    parser.add_argument('--model-type', type=str, default='TD3')
+    parser.add_argument('--agent', type=str, default='TD3')
     # boolean_flag(parser, 'render-eval', default=False)
     boolean_flag(parser, 'layer-norm', default=True)
     # boolean_flag(parser, 'render', default=False)
@@ -128,8 +129,16 @@ def parse_args():
     return dict_args
 
 
+def save_args(args):
+    log_dir= os.getenv("OPENAI_LOGDIR")
+    param_file = os.path.join(log_dir, "params.txt")
+    with open(param_file, "w") as pf:
+        pf.write(json.dumps(args))
+
+
 if __name__ == '__main__':
     args = parse_args()
+    save_args(args)
     logger.configure()
     # Run actual script.
     run(**args)

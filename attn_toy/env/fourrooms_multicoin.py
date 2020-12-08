@@ -5,14 +5,14 @@ from gym import error, spaces
 from gym import core, spaces
 from gym.envs.registration import register
 import random
-from attn_toy.env.rendering import *
+# from attn_toy.env.rendering import *
 from attn_toy.env.fourrooms import Fourrooms, FourroomsNorender
 from copy import copy
 
 
 class FourroomsMultiCoin(FourroomsNorender):
-    def __init__(self, max_epilen=100, num_coins=3, random_coin=False):
-        super(FourroomsMultiCoin, self).__init__(max_epilen)
+    def __init__(self, max_epilen=100, goal=77, num_coins=3, random_coin=False):
+        super(FourroomsMultiCoin, self).__init__(max_epilen, goal)
         assert self.num_pos > (num_coins + 2)
         self.num_coins = num_coins
         self.observation_space = spaces.Discrete(self.num_pos * (2 ** num_coins))
@@ -101,9 +101,9 @@ class FourroomsMultiCoin(FourroomsNorender):
 
 
 class FourroomsMultiCoinRandomNoise(FourroomsMultiCoin):  # noise type = optimal action
-    def __init__(self, max_epilen=100, obs_size=128, seed=0, num_colors=200):
+    def __init__(self, max_epilen=100, obs_size=128, seed=0, num_colors=200, goal=77):
         np.random.seed(seed)
-        super(FourroomsMultiCoinRandomNoise, self).__init__(max_epilen)
+        super(FourroomsMultiCoinRandomNoise, self).__init__(max_epilen, goal=goal)
         self.obs_size = obs_size
         self.obs_height = obs_size
         self.obs_width = obs_size

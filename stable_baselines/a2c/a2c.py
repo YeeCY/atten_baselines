@@ -297,7 +297,8 @@ class A2C(ActorCriticRLModel):
                         logger.logkv('ep_len_mean', safe_mean([ep_info['l'] for ep_info in self.ep_info_buf]))
                     logger.dump_tabular()
                 # print("saving image")
-                self.save_img(obs[np.random.randint(0, len(obs), 2)],numsteps=self.num_timesteps)
+                if update == 1:
+                    self.save_img(obs[np.random.randint(0, len(obs), 2)],numsteps=self.num_timesteps)
         callback.on_training_end()
         return self
 

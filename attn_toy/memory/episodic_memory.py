@@ -39,7 +39,8 @@ class EpisodicMemory(object):
                 self.pointer = (self.pointer + 1) % self.capacity
 
                 origin_hash = self.hash_func(self.obs[index])
-                self.state_dict.pop(origin_hash)
+                if origin_hash is self.state_dict.keys():
+                    self.state_dict.pop(origin_hash)
             else:
                 self.curr_capacity = min(self.curr_capacity + 1, self.capacity)
                 self.pointer = (self.pointer + 1) % self.capacity

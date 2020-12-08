@@ -844,6 +844,26 @@ class ActorCriticRLModel(BaseRLModel):
 
         return clipped_actions, states
 
+    @staticmethod
+    def emb_dist(emb1, emb2):
+        return tf.maximum(0., tf.reduce_sum(tf.square(emb1 - emb2), axis=1))
+
+    def contrastive_loss_fc(self, emb_cur, emb_next, emb_neq, margin=1., c_type='origin'):
+        if c_type is None or c_type == 'origin':
+            return tf.reduce_mean(
+                tf.maximum(
+                    tf.sqrt(self.emb_dist(emb_cur, emb_neq)) - 2 * tf.sqrt(self.emb_dist(emb_cur, emb_next)) + margin,
+                    0))
+        elif c_type == 'sqmargin':
+            return tf.reduce_mean(self.emb_dist(emb_cur, emb_next) +
+                                  tf.maximum(0.,
+                                             margin - self.emb_dist(emb_cur, emb_neq)))
+        else:
+            return tf.reduce_mean(self.emb_dist(emb_cur, emb_next) + tf.square(tf.maximum(0., margin -
+                                                                                          tf.math.sqrt(
+                                                                                              self.emb_dist(emb_cur,
+                                                                                                            emb_neq)))))
+
     def action_probability(self, observation, state=None, mask=None, actions=None, logp=False):
         if state is None:
             state = self.initial_state
