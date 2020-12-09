@@ -289,7 +289,7 @@ class FourroomsOptimalNoisePos(FourroomsOptimalNoise):  # noise type = optimal a
         pos = self.optimal_action[state]
         obs[pos * 12:pos * 12 + 12, :12] = self.color[pos]
 
-        arr = Fourrooms.render(state % self.num_pos)
+        arr = Fourrooms().render(state % self.num_pos)
         padding_height, padding_width = (obs.shape[0] - arr.shape[0]) // 2, (obs.shape[1] - arr.shape[1]) // 2
         obs[padding_height:padding_height + arr.shape[0], padding_width:padding_width + arr.shape[1], :] = arr
         return obs.astype(np.uint8)

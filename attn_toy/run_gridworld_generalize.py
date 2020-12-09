@@ -100,14 +100,14 @@ def main():
     args = parser.parse_args()
     logger.configure()
     print("seed:", args.seed)
-    replay_buffer = value_iteration(make_gridworld(noise_type=3, seed=args.seed)(), gamma=1, filedir="/home/hh/attn/")
+    replay_buffer = value_iteration(make_gridworld(noise_type=3, seed=args.seed)(), gamma=1, filedir="~/attn/")
     optimal_action = np.argmax(replay_buffer.returns[:replay_buffer.curr_capacity], axis=1)
     env = SubprocVecEnv(
-        [make_gridworld(noise_type=9, seed=args.seed, env_kwargs={"goal": 77, "optimal_action": optimal_action})
+        [make_gridworld(noise_type=5, seed=args.seed, env_kwargs={"goal": 77, "optimal_action": optimal_action})
          for _ in range(args.n_env)])
     # env = VecFrameStack(make_atari_env(args.env, args.n_envs, args.seed), 4)
     test_env = SubprocVecEnv(
-        [make_gridworld(noise_type=8, seed=args.seed + 1,
+        [make_gridworld(noise_type=4, seed=args.seed + 1,
                         env_kwargs={"goal": 77}) for _ in range(args.n_env)])
     # [make_gridworld(noise_type=4, seed=args.seed, optimal_action=optimal_action) for _ in range(args.n_env)])
     # print(test_env)
